@@ -11,6 +11,8 @@ import {
   useWriteContract,
 } from 'wagmi';
 import {
+  AGENT_REGISTRY_ABI,
+  AGENT_REGISTRY_ADDRESS,
   LEVELS,
   PIG_BADGE_ABI,
   PIG_BADGE_ADDRESS,
@@ -22,6 +24,14 @@ const MINT_COST = parseEther('500');
 
 export default function BadgePage() {
   const { address } = useAccount();
+
+  const { data: isAgentWallet } = useReadContract({
+    address: AGENT_REGISTRY_ADDRESS,
+    abi: AGENT_REGISTRY_ABI,
+    functionName: 'isAgentWallet',
+    args: address ? [address] : undefined,
+    query: { enabled: Boolean(address) },
+  });
 
   const { data: balance, refetch: refetchBal } = useReadContract({
     address: ZHUZHU_TOKEN_ADDRESS,
@@ -122,16 +132,25 @@ export default function BadgePage() {
           ) : (
             <button
               onClick={handleMintBadge}
-              disabled={!address || !hasEnough || badgeCount >= 3 || isPending || isConfirming}
+              disabled={
+                !address ||
+                isAgentWallet === false ||
+                !hasEnough ||
+                badgeCount >= 3 ||
+                isPending ||
+                isConfirming
+              }
               className="rounded-2xl bg-pig-500 px-6 py-3 text-sm font-bold text-white hover:bg-pig-600 disabled:opacity-50"
             >
-              {isPending || isConfirming
-                ? '铸造中...'
-                : badgeCount >= 3
-                  ? '已达 3 张上限'
-                  : !hasEnough
-                    ? 'ZHUZHU 余额不足'
-                    : '2. 燃烧 500 铸造工牌'}
+              {isAgentWallet === false
+                ? '请先绑定 .ai Agent ID'
+                : isPending || isConfirming
+                  ? '铸造中...'
+                  : badgeCount >= 3
+                    ? '已达 3 张上限'
+                    : !hasEnough
+                      ? 'ZHUZHU 余额不足'
+                      : '2. 燃烧 500 铸造工牌'}
             </button>
           )}
         </div>

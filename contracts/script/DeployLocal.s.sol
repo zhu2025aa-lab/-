@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
+import {AgentWalletRegistry} from "../src/AgentWalletRegistry.sol";
 import {GamePool} from "../src/GamePool.sol";
 import {TeamVesting} from "../src/TeamVesting.sol";
 import {ZhuZhuToken} from "../src/ZhuZhuToken.sol";
@@ -25,6 +26,7 @@ contract LocalMockPair {
         totalSupply += liq;
         balanceOf[to] += liq;
     }
+    function sync() external {}
 }
 
 contract LocalMockFactory {
@@ -57,16 +59,33 @@ contract DeployLocalScript is Script {
         LocalMockFactory factory = new LocalMockFactory();
         LocalMockRouter router = new LocalMockRouter(address(factory), address(wbnb));
 
+        AgentWalletRegistry registry = new AgentWalletRegistry(address(0), false);
         GamePool pool = new GamePool();
         TeamVesting vesting = new TeamVesting(deployer, uint64(block.timestamp), 90 days, 365 days);
-        ZhuZhuToken token = new ZhuZhuToken(address(router), address(pool), address(vesting), deployer);
-        PigBadge badge = new PigBadge(address(token), address(pool), address(0), "https://zhuzhu.xyz/api/badge/");
+        ZhuZhuToken token = new ZhuZhuToken(
+            address(router),
+            address(pool),
+            address(vesting),
+            deployer,
+            address(registry)
+        );
+        PigBadge badge = new PigBadge(
+            address(token),
+            address(pool),
+            address(registry),
+            address(0),
+            ""
+        );
 
         pool.init(address(token), address(badge));
         pool.renounceOwnership();
 
+        // Pre-activate deployer as a demo AI Agent wallet on local Anvil
+        registry.activateAgentWallet("deployer.ai", 0, "");
+
         vm.stopBroadcast();
 
+        console2.log("AGENT_REGISTRY=", address(registry));
         console2.log("ZHUZHU_TOKEN=", address(token));
         console2.log("PIG_BADGE=", address(badge));
         console2.log("GAME_POOL=", address(pool));

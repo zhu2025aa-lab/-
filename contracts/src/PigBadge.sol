@@ -7,21 +7,30 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
+import {Base64} from "@openzeppelin/contracts/utils/Base64.sol";
 
 interface IZhuZhu {
     function burnFrom(address account, uint256 value) external;
+    function tradingOpen() external view returns (bool);
 }
 
 interface IGamePool {
     function payout(address to, uint256 amount) external returns (uint256);
 }
 
+interface IAgentRegistry {
+    function isAgentWallet(address account) external view returns (bool);
+}
+
 /**
  * @title PigBadge (PIGBADGE)
- * @notice ERC721 Pig Pen Badge. Owners delegate work() rights to an AI Agent address,
- *         while retaining NFT ownership, rewards, and level-up control.
+ * @notice BSC-only ERC721 Pig Pen Badge with on-chain dynamic SVG metadata.
+ *         Gated to BSC AI Agent Wallets via AgentWalletRegistry.
  */
 contract PigBadge is ERC721Enumerable, Ownable, ReentrancyGuard, EIP712 {
+    using Strings for uint256;
+
     struct Badge {
         uint8 level;       // 1..5
         uint32 xp;
@@ -34,6 +43,7 @@ contract PigBadge is ERC721Enumerable, Ownable, ReentrancyGuard, EIP712 {
 
     IZhuZhu public immutable zhuzhu;
     IGamePool public immutable pool;
+    IAgentRegistry public immutable agentRegistry;
 
     uint256 public constant MAX_SUPPLY = 10_000;
     uint256 public constant MAX_PER_WALLET = 3;
@@ -43,15 +53,16 @@ contract PigBadge is ERC721Enumerable, Ownable, ReentrancyGuard, EIP712 {
     uint256 public constant XP_PER_WORK = 10;
     uint256 public constant BASE_REWARD = 10 ether;
     uint256 public constant DAILY_CAP = 4_000 ether;
-    uint256 public constant VERIFIED_BONUS_BPS = 1_000; // +10% for verified .ai Agent ID
+    uint256 public constant VERIFIED_BONUS_BPS = 1_000; // +10% for sig-verified .ai Agent ID
+    uint256 public constant MAX_HERD_BONUS_BPS = 5_000; // +1% per 10 pigs, max +50% at 500 pigs
 
     bytes32 public constant ASSIGN_TYPEHASH = keccak256(
-        "AssignAgent(uint256 tokenId,address agent,bytes32 agentIdHash,uint256 deadline)"
+        "AssignAgent(uint256 tokenId,address owner,address agent,bytes32 agentIdHash,uint256 nonce,uint256 deadline)"
     );
 
-    uint32[6] public xpToNext = [0, 100, 300, 800, 2000, 0];
-    uint256[6] public upgradeBurn = [0, 1_000 ether, 3_000 ether, 8_000 ether, 20_000 ether, 0];
-    uint16[6] public multBps = [0, 10_000, 12_500, 15_000, 20_000, 30_000];
+    uint32[6] public xpToNext = [0, 100, 300, 600, 1200, 0];
+    uint256[6] public upgradeBurn = [0, 300 ether, 800 ether, 2_000 ether, 5_000 ether, 0];
+    uint16[6] public multBps = [0, 10_000, 15_000, 22_000, 35_000, 60_000];
     uint8[6] public pigsPerWork = [0, 1, 2, 3, 5, 8];
 
     uint256 public nextId = 1;
@@ -63,6 +74,7 @@ contract PigBadge is ERC721Enumerable, Ownable, ReentrancyGuard, EIP712 {
     string private _baseTokenURI;
 
     mapping(uint256 => Badge) public badges;
+    mapping(uint256 => uint256) public nonces;
 
     event BadgeMinted(address indexed owner, uint256 indexed id);
     event AgentAssigned(uint256 indexed id, address indexed agent, bool verified);
@@ -73,6 +85,7 @@ contract PigBadge is ERC721Enumerable, Ownable, ReentrancyGuard, EIP712 {
     constructor(
         address _zhuzhu,
         address _pool,
+        address _agentRegistry,
         address _verifierSigner,
         string memory baseURI_
     )
@@ -80,9 +93,14 @@ contract PigBadge is ERC721Enumerable, Ownable, ReentrancyGuard, EIP712 {
         Ownable(msg.sender)
         EIP712("PigBadge", "1")
     {
-        require(_zhuzhu != address(0) && _pool != address(0), "zero addr");
+        require(
+            block.chainid == 56 || block.chainid == 97 || block.chainid == 31337,
+            "BSC chain only"
+        );
+        require(_zhuzhu != address(0) && _pool != address(0) && _agentRegistry != address(0), "zero addr");
         zhuzhu = IZhuZhu(_zhuzhu);
         pool = IGamePool(_pool);
+        agentRegistry = IAgentRegistry(_agentRegistry);
         verifierSigner = _verifierSigner;
         _baseTokenURI = baseURI_;
     }
@@ -92,8 +110,9 @@ contract PigBadge is ERC721Enumerable, Ownable, ReentrancyGuard, EIP712 {
         _;
     }
 
-    // ---- Mint: burn 500 ZHUZHU (requires prior approve) ----
+    // ---- Mint: burn 500 ZHUZHU (requires prior approve & BSC AI Agent Wallet) ----
     function mint() external nonReentrant returns (uint256 id) {
+        require(agentRegistry.isAgentWallet(msg.sender), "only BSC AI Agent Wallet");
         require(nextId <= MAX_SUPPLY, "sold out");
         require(balanceOf(msg.sender) < MAX_PER_WALLET, "wallet cap");
 
@@ -117,6 +136,7 @@ contract PigBadge is ERC721Enumerable, Ownable, ReentrancyGuard, EIP712 {
     // ---- Agent Delegation ----
     function assignAgent(uint256 id, address agent) external onlyBadgeOwner(id) {
         require(agent != address(0), "zero");
+        require(agentRegistry.isAgentWallet(agent), "agent must be AI Agent Wallet");
         badges[id].agent = agent;
         badges[id].verifiedAgent = false;
         emit AgentAssigned(id, agent, false);
@@ -131,10 +151,12 @@ contract PigBadge is ERC721Enumerable, Ownable, ReentrancyGuard, EIP712 {
     ) external onlyBadgeOwner(id) {
         require(verifierSigner != address(0), "verifier disabled");
         require(agent != address(0), "zero");
+        require(agentRegistry.isAgentWallet(agent), "agent must be AI Agent Wallet");
         require(block.timestamp <= deadline, "expired");
 
+        uint256 nonce = nonces[id]++;
         bytes32 structHash = keccak256(
-            abi.encode(ASSIGN_TYPEHASH, id, agent, agentIdHash, deadline)
+            abi.encode(ASSIGN_TYPEHASH, id, msg.sender, agent, agentIdHash, nonce, deadline)
         );
         address recovered = ECDSA.recover(_hashTypedDataV4(structHash), sig);
         require(recovered == verifierSigner, "bad sig");
@@ -152,9 +174,10 @@ contract PigBadge is ERC721Enumerable, Ownable, ReentrancyGuard, EIP712 {
 
     // ---- Agent Work ----
     function work(uint256 id) external nonReentrant {
+        require(zhuzhu.tradingOpen(), "trading not open");
         Badge storage b = badges[id];
         require(b.agent != address(0) && msg.sender == b.agent, "not agent");
-        require(block.timestamp >= b.lastWorkAt + WORK_COOLDOWN, "pigs are sleeping");
+        require(b.lastWorkAt == 0 || block.timestamp >= b.lastWorkAt + WORK_COOLDOWN, "pigs are sleeping");
 
         b.streak = (b.lastWorkAt != 0 && block.timestamp <= b.lastWorkAt + STREAK_WINDOW)
             ? b.streak + 1
@@ -167,9 +190,14 @@ contract PigBadge is ERC721Enumerable, Ownable, ReentrancyGuard, EIP712 {
         totalPigs += addedPigs;
 
         uint256 streakBonus = b.streak > 10 ? 2_000 : (b.streak - 1) * 200; // max +20%
-        uint256 verifiedBonus = b.verifiedAgent ? VERIFIED_BONUS_BPS : 0;
+        uint256 verifiedBonus = b.verifiedAgent ? VERIFIED_BONUS_BPS : 0;   // +10%
+        uint256 herdBonus = (uint256(b.pigs) / 10) * 100;                   // +1% per 10 pigs
+        if (herdBonus > MAX_HERD_BONUS_BPS) {
+            herdBonus = MAX_HERD_BONUS_BPS;                                 // max +50%
+        }
+
         uint256 reward = (BASE_REWARD * multBps[b.level]) / 10_000;
-        reward = (reward * (10_000 + streakBonus + verifiedBonus)) / 10_000;
+        reward = (reward * (10_000 + streakBonus + verifiedBonus + herdBonus)) / 10_000;
 
         uint256 today = block.timestamp / 1 days;
         if (today != currentDay) {
@@ -217,10 +245,102 @@ contract PigBadge is ERC721Enumerable, Ownable, ReentrancyGuard, EIP712 {
         }
     }
 
-    function canWork(uint256 id) external view returns (bool ready, uint256 nextWorkAt) {
+    function canWork(uint256 id) public view returns (bool ready, uint256 nextWorkAt) {
+        if (id == 0 || id >= nextId) return (false, 0);
         Badge storage b = badges[id];
-        nextWorkAt = uint256(b.lastWorkAt) + WORK_COOLDOWN;
-        ready = (b.agent != address(0) && block.timestamp >= nextWorkAt);
+        nextWorkAt = b.lastWorkAt == 0 ? block.timestamp : uint256(b.lastWorkAt) + WORK_COOLDOWN;
+        ready = (zhuzhu.tradingOpen() && b.agent != address(0) && block.timestamp >= nextWorkAt);
+    }
+
+    function getAgentBadges(address agent)
+        external
+        view
+        returns (uint256[] memory ids, bool[] memory readyList, uint256[] memory nextWorkAtList)
+    {
+        uint256 total = nextId - 1;
+        uint256 count;
+        for (uint256 i = 1; i <= total; i++) {
+            if (badges[i].agent == agent) count++;
+        }
+        ids = new uint256[](count);
+        readyList = new bool[](count);
+        nextWorkAtList = new uint256[](count);
+        uint256 idx;
+        for (uint256 i = 1; i <= total; i++) {
+            if (badges[i].agent == agent) {
+                ids[idx] = i;
+                (readyList[idx], nextWorkAtList[idx]) = canWork(i);
+                idx++;
+            }
+        }
+    }
+
+    function tokenURI(uint256 id) public view override returns (string memory) {
+        _requireOwned(id);
+        if (bytes(_baseTokenURI).length > 0) {
+            return super.tokenURI(id);
+        }
+
+        Badge memory b = badges[id];
+        string memory roleName = _roleName(b.level);
+        string memory svg = string.concat(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 220" width="360" height="220">',
+            '<rect width="360" height="220" rx="18" fill="#11111b" stroke="#f43f75" stroke-width="2"/>',
+            '<text x="24" y="42" fill="#fb7196" font-family="sans-serif" font-size="14" font-weight="bold">ZHUZHU AGENT BADGE #',
+            id.toString(),
+            '</text>',
+            '<text x="24" y="78" fill="#ffffff" font-family="sans-serif" font-size="22" font-weight="bold">Lv',
+            uint256(b.level).toString(),
+            ' ',
+            roleName,
+            '</text>',
+            '<text x="24" y="122" fill="#cbd5e1" font-family="sans-serif" font-size="15">Pigs: ',
+            uint256(b.pigs).toString(),
+            ' | XP: ',
+            uint256(b.xp).toString(),
+            '</text>',
+            '<text x="24" y="152" fill="#cbd5e1" font-family="sans-serif" font-size="15">Streak: ',
+            uint256(b.streak).toString(),
+            ' | Herd Bonus: +',
+            _herdBonusPct(b.pigs).toString(),
+            '%</text>',
+            '<text x="24" y="192" fill="#94a3b8" font-family="sans-serif" font-size="12">You lie flat, Agent raises pigs.</text>',
+            '</svg>'
+        );
+
+        string memory json = string.concat(
+            '{"name":"Pig Pen Badge #',
+            id.toString(),
+            '","description":"ZhuZhu Agent on-chain Pig Pen Badge. You lie flat, Agent raises pigs.",',
+            '"image":"data:image/svg+xml;base64,',
+            Base64.encode(bytes(svg)),
+            '","attributes":[{"trait_type":"Level","value":',
+            uint256(b.level).toString(),
+            '},{"trait_type":"Role","value":"',
+            roleName,
+            '"},{"trait_type":"Pigs","value":',
+            uint256(b.pigs).toString(),
+            '},{"trait_type":"XP","value":',
+            uint256(b.xp).toString(),
+            '},{"trait_type":"Streak","value":',
+            uint256(b.streak).toString(),
+            '}]}'
+        );
+
+        return string.concat("data:application/json;base64,", Base64.encode(bytes(json)));
+    }
+
+    function _herdBonusPct(uint32 pigs) internal pure returns (uint256 pct) {
+        pct = uint256(pigs) / 10;
+        if (pct > 50) pct = 50;
+    }
+
+    function _roleName(uint8 level) internal pure returns (string memory) {
+        if (level == 1) return "Piglet Intern";
+        if (level == 2) return "Pen Worker";
+        if (level == 3) return "Farm Supervisor";
+        if (level == 4) return "Regional Pig Boss";
+        return "Pig Emperor";
     }
 
     function _baseURI() internal view override returns (string memory) {

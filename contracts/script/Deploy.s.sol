@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
+import {AgentWalletRegistry} from "../src/AgentWalletRegistry.sol";
 import {GamePool} from "../src/GamePool.sol";
 import {TeamVesting} from "../src/TeamVesting.sol";
 import {ZhuZhuToken} from "../src/ZhuZhuToken.sol";
@@ -24,14 +25,18 @@ contract DeployScript is Script {
         address teamBeneficiary = vm.envOr("TEAM_BENEFICIARY", deployer);
         address marketing = vm.envOr("MARKETING_WALLET", deployer);
         address verifier = vm.envOr("AGENT_VERIFIER_SIGNER", address(0));
-        string memory baseURI = vm.envOr("BADGE_BASE_URI", string("https://zhuzhu.xyz/api/badge/"));
+        bool requireSig = vm.envOr("REQUIRE_AGENT_SIG", false);
+        string memory baseURI = vm.envOr("BADGE_BASE_URI", string(""));
 
         vm.startBroadcast(pk);
 
-        // 1. Deploy GamePool
+        // 1. Deploy AgentWalletRegistry (BSC AI Agent Wallet gating)
+        AgentWalletRegistry registry = new AgentWalletRegistry(verifier, requireSig);
+
+        // 2. Deploy GamePool
         GamePool pool = new GamePool();
 
-        // 2. Deploy TeamVesting (90d cliff, 365d linear after start)
+        // 3. Deploy TeamVesting (90d cliff, 365d linear after cliff)
         TeamVesting vesting = new TeamVesting(
             teamBeneficiary,
             uint64(block.timestamp),
@@ -39,33 +44,36 @@ contract DeployScript is Script {
             365 days
         );
 
-        // 3. Deploy ZhuZhuToken
+        // 4. Deploy ZhuZhuToken
         ZhuZhuToken token = new ZhuZhuToken(
             router,
             address(pool),
             address(vesting),
-            marketing
+            marketing,
+            address(registry)
         );
 
-        // 4. Deploy PigBadge
+        // 5. Deploy PigBadge
         PigBadge badge = new PigBadge(
             address(token),
             address(pool),
+            address(registry),
             verifier,
             baseURI
         );
 
-        // 5. Initialize GamePool & renounce ownership
+        // 6. Initialize GamePool & renounce ownership
         pool.init(address(token), address(badge));
         pool.renounceOwnership();
 
         vm.stopBroadcast();
 
-        console2.log("Chain ID   :", block.chainid);
-        console2.log("Deployer   :", deployer);
-        console2.log("GamePool   :", address(pool));
-        console2.log("TeamVesting:", address(vesting));
-        console2.log("ZhuZhuToken:", address(token));
-        console2.log("PigBadge   :", address(badge));
+        console2.log("Chain ID       :", block.chainid);
+        console2.log("Deployer       :", deployer);
+        console2.log("AGENT_REGISTRY :", address(registry));
+        console2.log("GamePool       :", address(pool));
+        console2.log("TeamVesting    :", address(vesting));
+        console2.log("ZhuZhuToken    :", address(token));
+        console2.log("PigBadge       :", address(badge));
     }
 }

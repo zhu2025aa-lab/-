@@ -24,6 +24,7 @@ interface IPancakeFactory {
 
 interface IPancakePair {
     function mint(address to) external returns (uint256 liquidity);
+    function sync() external;
 }
 
 interface IWBNB {
@@ -31,9 +32,14 @@ interface IWBNB {
     function transfer(address to, uint256 value) external returns (bool);
 }
 
+interface IAgentRegistry {
+    function isAgentWallet(address account) external view returns (bool);
+}
+
 /**
  * @title ZhuZhuToken ($ZHUZHU)
- * @notice BSC Meme + DeFAI token: Pack Mint, auto LP burn on launch, buy/sell tax, buyback & burn.
+ * @notice BSC-only Meme + DeFAI token: gated to BSC AI Agent Wallets, Pack Mint,
+ *         auto LP burn on launch, buy/sell tax, buyback & burn.
  */
 contract ZhuZhuToken is ERC20, ERC20Burnable, Ownable, ReentrancyGuard {
     // ---- Tokenomics (Total: 20,000,000) ----
@@ -50,7 +56,8 @@ contract ZhuZhuToken is ERC20, ERC20Burnable, Ownable, ReentrancyGuard {
     uint256 public constant MAX_PACKS_PER_WALLET = 10;
     uint256 public constant REF_BPS = 500;      // 5%
     uint256 public constant LP_BPS = 8000;      // 80%
-    uint256 public constant BUYBACK_BPS = 1000; // 10%, remaining 5% (or 10% if no ref) -> ops
+    uint256 public constant OPS_BPS = 500;      // 5% fixed
+    uint256 public constant BUYBACK_BPS = 1000; // 10% base (+5% when no referrer)
 
     // ---- Tax ----
     uint256 public constant MAX_TAX_BPS = 500;
@@ -60,6 +67,7 @@ contract ZhuZhuToken is ERC20, ERC20Burnable, Ownable, ReentrancyGuard {
 
     IPancakeRouter02 public immutable router;
     address public immutable gamePool;
+    IAgentRegistry public immutable agentRegistry;
     address public pair;
     uint256 public immutable mintEnd;
     bool public tradingOpen;
@@ -84,13 +92,20 @@ contract ZhuZhuToken is ERC20, ERC20Burnable, Ownable, ReentrancyGuard {
         address _router,
         address _gamePool,
         address _teamVesting,
-        address _marketing
+        address _marketing,
+        address _agentRegistry
     ) ERC20("ZhuZhu Coin", "ZHUZHU") Ownable(msg.sender) {
+        require(
+            block.chainid == 56 || block.chainid == 97 || block.chainid == 31337,
+            "BSC chain only"
+        );
         require(_router != address(0) && _gamePool != address(0), "zero addr");
         require(_teamVesting != address(0) && _marketing != address(0), "zero addr");
+        require(_agentRegistry != address(0), "zero addr");
 
         router = IPancakeRouter02(_router);
         gamePool = _gamePool;
+        agentRegistry = IAgentRegistry(_agentRegistry);
         mintEnd = block.timestamp + 72 hours;
 
         _mint(address(this), MINT_ALLOC + LP_ALLOC);
@@ -100,12 +115,14 @@ contract ZhuZhuToken is ERC20, ERC20Burnable, Ownable, ReentrancyGuard {
 
         isExempt[address(this)] = true;
         isExempt[_gamePool] = true;
+        isExempt[_teamVesting] = true;
         isExempt[_marketing] = true;
     }
 
     // ================= Pack Mint =================
 
     function mintPacks(uint256 packs, address ref) external payable nonReentrant {
+        require(agentRegistry.isAgentWallet(msg.sender), "only BSC AI Agent Wallet");
         require(!tradingOpen && block.timestamp < mintEnd, "mint closed");
         require(packs > 0, "zero");
         require(packsSold + packs <= MAX_PACKS, "sold out");
@@ -124,14 +141,15 @@ contract ZhuZhuToken is ERC20, ERC20Burnable, Ownable, ReentrancyGuard {
         address r = referrerOf[msg.sender];
         uint256 refCut = r == address(0) ? 0 : (msg.value * REF_BPS) / 10_000;
         uint256 lpCut = (msg.value * LP_BPS) / 10_000;
-        uint256 bbCut = (msg.value * BUYBACK_BPS) / 10_000;
+        uint256 opsCut = (msg.value * OPS_BPS) / 10_000;
+        uint256 bbCut = msg.value - refCut - lpCut - opsCut; // 10% base + 5% if no referrer
 
         if (refCut > 0) {
             refRewards[r] += refCut;
         }
         lpBnb += lpCut;
         buybackBnb += bbCut;
-        opsBnb += msg.value - refCut - lpCut - bbCut;
+        opsBnb += opsCut;
 
         packsSold += packs;
         packsOf[msg.sender] += packs;
@@ -151,15 +169,19 @@ contract ZhuZhuToken is ERC20, ERC20Burnable, Ownable, ReentrancyGuard {
 
     // ================= Launch =================
 
-    /**
-     * @notice Anyone can trigger launch once sold out or mint window ends.
-     *         Directly transfers token + WBNB into the pair and mints LP to DEAD
-     *         to prevent pair-donation frontrunning attacks.
-     */
     function launch() external nonReentrant {
         require(!tradingOpen, "launched");
         require(packsSold == MAX_PACKS || block.timestamp >= mintEnd, "not yet");
-        require(packsSold > 0, "no mint");
+
+        if (packsSold == 0) {
+            uint256 rem = balanceOf(address(this));
+            if (rem > 0) {
+                _burn(address(this), rem);
+            }
+            tradingOpen = true;
+            emit Launched(0, 0, address(0));
+            return;
+        }
 
         uint256 lpTokens = (LP_ALLOC * packsSold) / MAX_PACKS;
         uint256 unsold = (MAX_PACKS - packsSold) * TOKENS_PER_PACK + (LP_ALLOC - lpTokens);
@@ -180,11 +202,11 @@ contract ZhuZhuToken is ERC20, ERC20Burnable, Ownable, ReentrancyGuard {
 
         tradingOpen = true;
 
-        // Direct pair mint to DEAD (immune to dust donation DoS)
         super._update(address(this), p, lpTokens);
         IWBNB(wbnb).deposit{value: bnb}();
         require(IWBNB(wbnb).transfer(p, bnb), "wbnb transfer failed");
         IPancakePair(p).mint(DEAD);
+        IPancakePair(p).sync();
 
         emit Launched(lpTokens, bnb, p);
     }
@@ -192,7 +214,7 @@ contract ZhuZhuToken is ERC20, ERC20Burnable, Ownable, ReentrancyGuard {
     // ================= Buyback & Ops =================
 
     function buybackAndBurn(uint256 bnbAmount, uint256 minOut) external onlyOwner nonReentrant {
-        require(tradingOpen && bnbAmount > 0 && bnbAmount <= buybackBnb, "invalid");
+        require(tradingOpen && pair != address(0) && bnbAmount > 0 && bnbAmount <= buybackBnb, "invalid");
         buybackBnb -= bnbAmount;
 
         address[] memory path = new address[](2);

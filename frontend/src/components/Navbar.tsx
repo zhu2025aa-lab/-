@@ -3,6 +3,14 @@
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import {
+  useAccount,
+  useReadContract,
+  useWaitForTransactionReceipt,
+  useWriteContract,
+} from 'wagmi';
+import { AGENT_REGISTRY_ABI, AGENT_REGISTRY_ADDRESS } from '@/lib/contracts';
 
 const NAV_ITEMS = [
   { href: '/', label: '首页' },
@@ -14,6 +22,40 @@ const NAV_ITEMS = [
 
 export function Navbar() {
   const pathname = usePathname();
+  const { address, isConnected } = useAccount();
+  const [showBindModal, setShowBindModal] = useState(false);
+  const [agentName, setAgentName] = useState('piggy.ai');
+
+  const { data: agentId, refetch: refetchAgentId } = useReadContract({
+    address: AGENT_REGISTRY_ADDRESS,
+    abi: AGENT_REGISTRY_ABI,
+    functionName: 'agentIdOf',
+    args: address ? [address] : undefined,
+    query: { enabled: Boolean(address) },
+  });
+
+  const { writeContract, data: txHash, isPending, error } = useWriteContract();
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
+
+  useEffect(() => {
+    if (isSuccess) {
+      refetchAgentId();
+      setShowBindModal(false);
+    }
+  }, [isSuccess, refetchAgentId]);
+
+  const hasAgentId = Boolean(agentId && agentId.length > 0);
+  const validAiId = agentName.trim().toLowerCase().endsWith('.ai') && agentName.trim().length >= 4;
+
+  const handleActivate = () => {
+    if (!validAiId) return;
+    writeContract({
+      address: AGENT_REGISTRY_ADDRESS,
+      abi: AGENT_REGISTRY_ABI,
+      functionName: 'activateAgentWallet',
+      args: [agentName.trim(), BigInt(0), '0x'],
+    });
+  };
 
   return (
     <header className="sticky top-0 z-40 border-b border-white/10 bg-[#0b0b10]/85 backdrop-blur">
@@ -41,7 +83,21 @@ export function Navbar() {
           })}
         </nav>
 
-        <div className="flex items-center">
+        <div className="flex items-center gap-2">
+          {isConnected && (
+            hasAgentId ? (
+              <span className="hidden sm:inline-flex items-center gap-1 rounded-xl border border-emerald-500/30 bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-300">
+                🤖 {agentId}
+              </span>
+            ) : (
+              <button
+                onClick={() => setShowBindModal((v) => !v)}
+                className="rounded-xl border border-amber-500/40 bg-amber-500/15 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/25"
+              >
+                🪪 绑定 .ai Agent ID
+              </button>
+            )
+          )}
           <ConnectButton
             label="连接钱包"
             chainStatus="icon"
@@ -49,6 +105,44 @@ export function Navbar() {
           />
         </div>
       </div>
+
+      {showBindModal && isConnected && !hasAgentId && (
+        <div className="border-t border-white/10 bg-[#12121c] px-4 py-3">
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
+            <div className="text-xs text-slate-300">
+              <span className="font-bold text-pig-300">BSC AI Agent 钱包准入：</span>
+              仅限已激活 <code className="rounded bg-white/10 px-1">.ai</code> Agent ID 的 BSC 钱包参与 Mint 与领工牌。
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                value={agentName}
+                onChange={(e) => setAgentName(e.target.value)}
+                placeholder="例如 piggy.ai"
+                className="rounded-xl border border-white/15 bg-black/50 px-3 py-1.5 text-xs text-white outline-none focus:border-pig-500"
+              />
+              <button
+                onClick={handleActivate}
+                disabled={!validAiId || isPending || isConfirming}
+                className="rounded-xl bg-pig-500 px-4 py-1.5 text-xs font-bold text-white hover:bg-pig-600 disabled:opacity-40"
+              >
+                {isPending || isConfirming ? '激活中...' : '上链激活 .ai ID'}
+              </button>
+              <button
+                onClick={() => setShowBindModal(false)}
+                className="rounded-xl border border-white/10 px-3 py-1.5 text-xs text-slate-400 hover:text-white"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+          {error && (
+            <p className="mx-auto mt-2 max-w-6xl text-xs text-red-400">
+              激活失败：{error.message.slice(0, 120)}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Mobile Nav */}
       <div className="flex items-center gap-4 overflow-x-auto border-t border-white/5 px-4 py-2 md:hidden">
