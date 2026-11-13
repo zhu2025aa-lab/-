@@ -8,7 +8,7 @@ import {
   trustWallet,
 } from '@rainbow-me/rainbowkit/wallets';
 import { createConfig, http } from 'wagmi';
-import { bsc, bscTestnet } from 'wagmi/chains';
+import { bsc, bscTestnet, foundry } from 'wagmi/chains';
 
 const projectId = process.env.NEXT_PUBLIC_REOWN_PROJECT_ID || 'zhuzhu-agent-local-dev';
 
@@ -34,10 +34,11 @@ const connectors = connectorsForWallets(
 
 export const config = createConfig({
   connectors,
-  chains: [bsc, bscTestnet],
+  chains: [bsc, bscTestnet, foundry],
   transports: {
     [bsc.id]: http(),
     [bscTestnet.id]: http(),
+    [foundry.id]: http('http://127.0.0.1:8545'),
   },
   ssr: true,
 });
