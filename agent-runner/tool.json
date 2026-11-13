@@ -1,0 +1,17 @@
+{
+  "name": "zhuzhu_work",
+  "description": "为猪舍工牌（PigBadge）打卡养猪。只有当 8 小时冷却结束且当前钱包为该工牌指定的 Agent 时才能调用。",
+  "contract": "PigBadge",
+  "method": "work(uint256)",
+  "precheck": "canWork(id) == (true, nextWorkAt) && badges(id).agent == self",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "integer",
+        "description": "工牌 NFT 编号 (tokenId)"
+      }
+    },
+    "required": ["id"]
+  }
+}
