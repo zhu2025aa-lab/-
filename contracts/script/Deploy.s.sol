@@ -11,10 +11,16 @@ contract DeployScript is Script {
     function run() external {
         uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(pk);
-        address router = vm.envOr(
-            "PANCAKE_ROUTER",
-            address(0x10ED43C718714eb63d5aA57B78B54704E256024E)
-        );
+
+        address defaultRouter = block.chainid == 97
+            ? address(0xD99D1c33F9fC3444f8101754aBC46c52416550D1) // BSC Testnet Pancake V2 Router
+            : address(0x10ED43C718714eb63d5aA57B78B54704E256024E); // BSC Mainnet Pancake V2 Router
+
+        address router = vm.envOr("PANCAKE_ROUTER", defaultRouter);
+        if (block.chainid == 97) {
+            router = vm.envOr("PANCAKE_TESTNET_ROUTER", defaultRouter);
+        }
+
         address teamBeneficiary = vm.envOr("TEAM_BENEFICIARY", deployer);
         address marketing = vm.envOr("MARKETING_WALLET", deployer);
         address verifier = vm.envOr("AGENT_VERIFIER_SIGNER", address(0));
@@ -55,6 +61,8 @@ contract DeployScript is Script {
 
         vm.stopBroadcast();
 
+        console2.log("Chain ID   :", block.chainid);
+        console2.log("Deployer   :", deployer);
         console2.log("GamePool   :", address(pool));
         console2.log("TeamVesting:", address(vesting));
         console2.log("ZhuZhuToken:", address(token));
