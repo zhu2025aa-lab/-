@@ -44,7 +44,7 @@ export function formatContractError(err: unknown): string {
     return '仅限已绑定 .ai Agent ID 的币安 AI 钱包参与认购';
   }
   if (msg.includes('wallet cap reached')) {
-    return '已达到单钱包上限（最多 10 份 = 0.20 BNB）';
+    return '已达到单钱包上限（最多 10 份 = 0.02 BNB）';
   }
   if (msg.includes('exceeds total lots')) {
     return '剩余可认购份数不足';
@@ -53,7 +53,7 @@ export function formatContractError(err: unknown): string {
     return '社区认购已结束（已满额或已自动开盘组池）';
   }
   if (msg.includes('incorrect bnb amount')) {
-    return '支付的 BNB 金额必须等于 份数 × 0.02 BNB';
+    return '支付的 BNB 金额必须等于 份数 × 0.002 BNB';
   }
   if (msg.includes('already registered')) {
     return '当前钱包已绑定 .ai 身份，可直接参与认购';

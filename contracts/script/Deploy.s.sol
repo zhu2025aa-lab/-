@@ -40,17 +40,22 @@ contract DeployScript is Script {
                 OFFICIAL_MAINNET_AGENT_REGISTRY
             );
         } else {
-            AgentIdRegistry reg = new AgentIdRegistry();
-            address[] memory accts = new address[](3);
-            string[] memory handles = new string[](3);
-            accts[0] = USER_DEMO_WALLET;
-            handles[0] = "zhuzhu-7b30";
-            accts[1] = deployer;
-            handles[1] = "zhuzhu-admin";
-            accts[2] = AGENT_WORKER_WALLET;
-            handles[2] = "zhuzhu-agent";
-            reg.setHandlesBatch(accts, handles);
-            agentRegistry = address(reg);
+            address existingReg = vm.envOr("AGENT_REGISTRY_ADDRESS", address(0));
+            if (existingReg != address(0) && existingReg.code.length > 0) {
+                agentRegistry = existingReg;
+            } else {
+                AgentIdRegistry reg = new AgentIdRegistry();
+                address[] memory accts = new address[](3);
+                string[] memory handles = new string[](3);
+                accts[0] = USER_DEMO_WALLET;
+                handles[0] = "zhuzhu-7b30";
+                accts[1] = deployer;
+                handles[1] = "zhuzhu-admin";
+                accts[2] = AGENT_WORKER_WALLET;
+                handles[2] = "zhuzhu-agent";
+                reg.setHandlesBatch(accts, handles);
+                agentRegistry = address(reg);
+            }
         }
 
         ZhuZhuToken token = new ZhuZhuToken(
@@ -62,9 +67,9 @@ contract DeployScript is Script {
 
         address tracker = token.DIVIDEND_TRACKER();
 
-        // On Testnet / Anvil, seed 1 initial mint (0.02 BNB) + 0.005 BNB dividend pool for live preview
+        // On Testnet / Anvil, seed 1 initial mint (0.002 BNB) + 0.005 BNB dividend pool for live preview
         if (block.chainid != 56) {
-            token.mint{value: 0.02 ether}(1);
+            token.mint{value: 0.002 ether}(1);
             ZhuZhuDividendTracker(payable(tracker)).distributeDividends{value: 0.005 ether}();
         }
 

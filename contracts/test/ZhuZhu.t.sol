@@ -117,7 +117,7 @@ contract ZhuZhuTest is Test {
 
         vm.prank(normie);
         vm.expectRevert("Binance AI Agent ID (.ai) required");
-        token.mint{value: 0.02 ether}(1);
+        token.mint{value: 0.002 ether}(1);
 
         vm.prank(normie);
         registry.register("normie-bot");
@@ -125,54 +125,54 @@ contract ZhuZhuTest is Test {
         assertEq(registry.handleOf(normie), "normie-bot");
 
         vm.prank(normie);
-        token.mint{value: 0.02 ether}(1);
-        assertEq(token.balanceOf(normie), 400_000_000 ether);
+        token.mint{value: 0.002 ether}(1);
+        assertEq(token.balanceOf(normie), 60_000_000 ether);
     }
 
     function test_MintPricingAndWalletCap() public {
-        assertEq(token.LOT_PRICE(), 0.02 ether);
+        assertEq(token.LOT_PRICE(), 0.002 ether);
         assertEq(token.MAX_LOTS_PER_WALLET(), 10);
-        assertEq(token.TOTAL_LOTS(), 1_500);
-        assertEq(token.TOKENS_PER_LOT(), 400_000_000 ether);
+        assertEq(token.TOTAL_LOTS(), 10_000);
+        assertEq(token.TOKENS_PER_LOT(), 60_000_000 ether);
         assertEq(token.totalSupply(), 1_000_000_000_000 ether);
         assertEq(token.balanceOf(community), 100_000_000_000 ether);
 
         // Wrong BNB reverts
         vm.prank(alice);
         vm.expectRevert("incorrect BNB amount");
-        token.mint{value: 0.01 ether}(1);
+        token.mint{value: 0.001 ether}(1);
 
-        // Mint 4 lots = 0.08 BNB -> 1.6B ZHUZHU
+        // Mint 4 lots = 0.008 BNB -> 240M ZHUZHU
         vm.prank(alice);
-        token.mint{value: 0.08 ether}(4);
+        token.mint{value: 0.008 ether}(4);
         assertEq(token.mintedLots(alice), 4);
         assertEq(token.lotsMinted(), 4);
-        assertEq(token.balanceOf(alice), 1_600_000_000 ether);
+        assertEq(token.balanceOf(alice), 240_000_000 ether);
 
-        // Mint remaining 6 lots -> 10 lots total = 0.20 BNB -> 4B ZHUZHU
+        // Mint remaining 6 lots -> 10 lots total = 0.02 BNB -> 600M ZHUZHU
         vm.prank(alice);
-        token.mint{value: 0.12 ether}(6);
+        token.mint{value: 0.012 ether}(6);
         assertEq(token.mintedLots(alice), 10);
-        assertEq(token.balanceOf(alice), 4_000_000_000 ether);
+        assertEq(token.balanceOf(alice), 600_000_000 ether);
 
         // 11th lot reverts
         vm.prank(alice);
         vm.expectRevert("wallet cap reached");
-        token.mint{value: 0.02 ether}(1);
+        token.mint{value: 0.002 ether}(1);
     }
 
-    function test_AutoLaunchAt1500LotsAndLpBurned() public {
-        // 150 wallets x 10 lots = 1,500 lots = 30 BNB
-        for (uint256 i = 0; i < 150; i++) {
+    function test_AutoLaunchAt10000LotsAndLpBurned() public {
+        // 1,000 wallets x 10 lots = 10,000 lots = 20 BNB
+        for (uint256 i = 0; i < 1_000; i++) {
             address minter = address(uint160(0x10000 + i));
             vm.deal(minter, 1 ether);
             vm.prank(minter);
             registry.register(string(abi.encodePacked("agent-", vm.toString(i))));
             vm.prank(minter);
-            token.mint{value: 0.20 ether}(10);
+            token.mint{value: 0.02 ether}(10);
         }
 
-        assertEq(token.lotsMinted(), 1_500);
+        assertEq(token.lotsMinted(), 10_000);
         assertTrue(token.tradingLive());
         assertFalse(token.mintOpen());
         assertEq(token.raisedBnb(), 0);
@@ -180,34 +180,34 @@ contract ZhuZhuTest is Test {
         address pair = token.pair();
         assertTrue(pair != address(0));
         assertEq(token.balanceOf(pair), 300_000_000_000 ether);
-        assertEq(wbnb.balanceOf(pair), 30 ether);
+        assertEq(wbnb.balanceOf(pair), 20 ether);
         assertEq(MockPair(pair).balanceOf(token.DEAD()), 1000 ether);
     }
 
     function test_ManualLaunchPartialMintBurnsUnsold() public {
         vm.prank(alice);
-        token.mint{value: 0.04 ether}(2);
+        token.mint{value: 0.004 ether}(2);
 
         token.launch();
         assertTrue(token.tradingLive());
         address pair = token.pair();
-        uint256 expectedLpTokens = (token.LP_ALLOC() * 2) / 1500;
+        uint256 expectedLpTokens = (token.LP_ALLOC() * 2) / 10_000;
         assertEq(token.balanceOf(pair), expectedLpTokens);
-        assertEq(wbnb.balanceOf(pair), 0.04 ether);
+        assertEq(wbnb.balanceOf(pair), 0.004 ether);
         assertGt(token.balanceOf(token.DEAD()), 0);
 
         // Minting after launch reverts
         vm.prank(bob);
         vm.expectRevert("mint closed");
-        token.mint{value: 0.02 ether}(1);
+        token.mint{value: 0.002 ether}(1);
     }
 
     function test_TaxSwapAndHoldToEarnDividends() public {
-        // Alice mints 10 lots (4B tokens), Bob mints 10 lots (4B tokens)
+        // Alice mints 10 lots (400M tokens), Bob mints 10 lots (400M tokens)
         vm.prank(alice);
-        token.mint{value: 0.20 ether}(10);
+        token.mint{value: 0.02 ether}(10);
         vm.prank(bob);
-        token.mint{value: 0.20 ether}(10);
+        token.mint{value: 0.02 ether}(10);
 
         token.launch();
         address pair = token.pair();
@@ -218,22 +218,23 @@ contract ZhuZhuTest is Test {
         assertFalse(tracker.isEligible(smallHolder));
         assertTrue(tracker.isEligible(alice));
 
-        // Simulate a buy (from pair -> bob) of 1,000,000,000 ZHUZHU: takes 3% (30M)
-        vm.prank(pair);
-        token.transfer(bob, 1_000_000_000 ether);
-        assertEq(token.balanceOf(address(token)), 30_000_000 ether);
+        // Lower swap threshold for 20-lot test pool and simulate two 100M buys (3% = 3M tax each)
+        token.setSwapThreshold(5_000_000 ether);
 
-        // Second buy triggers >50M swapThreshold in contract (60M >= 50M)
         vm.prank(pair);
-        token.transfer(bob, 1_000_000_000 ether);
-        assertEq(token.balanceOf(address(token)), 60_000_000 ether);
+        token.transfer(bob, 100_000_000 ether);
+        assertEq(token.balanceOf(address(token)), 3_000_000 ether);
+
+        vm.prank(pair);
+        token.transfer(bob, 100_000_000 ether);
+        assertEq(token.balanceOf(address(token)), 6_000_000 ether);
 
         uint256 communityBnbBefore = community.balance;
 
-        // Alice sells 100M ZHUZHU to pair -> triggers auto swap of 50M tax tokens for 0.2 BNB!
+        // Alice sells 50M ZHUZHU to pair -> triggers auto swap of 5M tax tokens for 0.2 BNB!
         // Split 50/50: 0.1 BNB to DividendTracker, 0.1 BNB to communityWallet
         vm.prank(alice);
-        token.transfer(pair, 100_000_000 ether);
+        token.transfer(pair, 50_000_000 ether);
 
         assertEq(community.balance - communityBnbBefore, 0.1 ether);
         assertApproxEqAbs(tracker.totalDistributed(), 0.1 ether, 1e12);
@@ -259,7 +260,7 @@ contract ZhuZhuTest is Test {
 
         // First eligible minter receives queued dividends once eligibleSupply > 0
         vm.prank(alice);
-        token.mint{value: 0.02 ether}(1);
+        token.mint{value: 0.002 ether}(1);
         assertEq(tracker.pendingDividends(), 0);
         assertApproxEqAbs(tracker.withdrawable(alice), 0.05 ether, 1e12);
     }

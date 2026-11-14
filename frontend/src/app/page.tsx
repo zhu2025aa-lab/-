@@ -39,17 +39,21 @@ const EXPLORER =
 const NETWORK_LABEL =
   TARGET_CHAIN_ID === 97 ? 'BSC Testnet (Chain ID 97)' : 'BNB Smart Chain (Chain ID 56)';
 
-const LOT_PRICE_BNB = 0.02;
-const TOKENS_PER_LOT = 400_000_000;
-const TOTAL_LOTS = 1_500;
+const LOT_PRICE_BNB = 0.002;
+const TOKENS_PER_LOT = 60_000_000;
+const TOTAL_LOTS = 10_000;
 const MAX_LOTS_PER_WALLET = 10;
+
+function formatBnb(n: number) {
+  return Number(n.toFixed(4)).toString();
+}
 
 const TOKENOMICS_CARDS = [
   {
     pct: '60%',
     title: '社区公平认购 Mint',
     amount: '600,000,000,000 ZHUZHU',
-    desc: '1,500 份 × 0.02 BNB = 30 BNB，单地址最多 10 份（0.20 BNB）。仅限币安 AI 钱包（.ai）认购。',
+    desc: '10,000 份 × 0.002 BNB = 20 BNB，单地址最多 10 份（0.02 BNB）。仅限币安 AI 钱包（.ai）认购。',
     accent: 'text-pig-400',
   },
   {
@@ -75,11 +79,11 @@ const FAQ_ITEMS = [
   },
   {
     q: '一份多少钱？单钱包最多打几份？',
-    a: '每份固定 0.02 BNB，可获得 400,000,000（4 亿）枚 $ZHUZHU。每个地址最多可认购 10 份，即打满需要 0.20 BNB，共获得 4,000,000,000（40 亿）枚 $ZHUZHU。全网共 1,500 份，总硬顶 30 BNB。',
+    a: '每份固定 0.002 BNB，可获得 60,000,000（6,000 万）枚 $ZHUZHU。每个地址最多可认购 10 份，即打满需要 0.02 BNB，共获得 600,000,000（6 亿）枚 $ZHUZHU。全网共 10,000 份，总硬顶 20 BNB。',
   },
   {
     q: '何时开盘交易？池子和 LP 是否安全？',
-    a: '当全网 1,500 份认购完成（达到 30 BNB 硬顶）时，最后一笔 Mint 交易会自动触发 PancakeSwap V2 组池并将所有募集 BNB + 30% 代币注入底池，同时把全部 LP Token 直接铸造至 0x0000...dEaD 黑洞地址永久销毁，项目方无法撤池，即时开放自由交易。',
+    a: '当全网 10,000 份认购完成（达到 20 BNB 硬顶）时，最后一笔 Mint 交易会自动触发 PancakeSwap V2 组池并将所有募集 BNB + 30% 代币注入底池，同时把全部 LP Token 直接铸造至 0x0000...dEaD 黑洞地址永久销毁，项目方无法撤池，即时开放自由交易。',
   },
   {
     q: '持币 BNB 分红怎么计算？需要质押或锁仓吗？',
@@ -261,6 +265,7 @@ export default function HomePage() {
     data: registerTxHash,
     isPending: isRegPending,
     error: regError,
+    reset: resetRegError,
   } = useWriteContract();
   const { isLoading: isRegConfirming, isSuccess: isRegSuccess } =
     useWaitForTransactionReceipt({ hash: registerTxHash, chainId: TARGET_CHAIN_ID });
@@ -270,9 +275,16 @@ export default function HomePage() {
     data: claimTxHash,
     isPending: isClaimPending,
     error: claimError,
+    reset: resetClaimError,
   } = useWriteContract();
   const { isLoading: isClaimConfirming, isSuccess: isClaimSuccess } =
     useWaitForTransactionReceipt({ hash: claimTxHash, chainId: TARGET_CHAIN_ID });
+
+  useEffect(() => {
+    resetMintError();
+    resetRegError();
+    resetClaimError();
+  }, [address, connector?.id, resetMintError, resetRegError, resetClaimError]);
 
   useEffect(() => {
     if (isMintSuccess || isRegSuccess || isClaimSuccess) {
@@ -311,7 +323,7 @@ export default function HomePage() {
 
   // Derived values
   const mintedCount = lotsMintedData ? Number(lotsMintedData) : 0;
-  const raisedBnbDisplay = (mintedCount * LOT_PRICE_BNB).toFixed(2);
+  const raisedBnbDisplay = formatBnb(mintedCount * LOT_PRICE_BNB);
   const progressPct = Math.min(100, (mintedCount / TOTAL_LOTS) * 100);
   const userMinted = userMintedLotsData ? Number(userMintedLotsData) : 0;
   const remainingUserLots = Math.max(0, MAX_LOTS_PER_WALLET - userMinted);
@@ -345,7 +357,8 @@ export default function HomePage() {
     ? Number(formatEther(checkedWithdrawn))
     : 0;
 
-  const costBnbStr = (lots * LOT_PRICE_BNB).toFixed(2);
+  const costBnbExact = (lots * LOT_PRICE_BNB).toFixed(3);
+  const costBnbStr = formatBnb(lots * LOT_PRICE_BNB);
   const expectedTokensStr = (lots * TOKENS_PER_LOT).toLocaleString('en-US');
 
   // Ensure lots selector clamps cleanly if remaining cap shrinks
@@ -390,7 +403,7 @@ export default function HomePage() {
       abi: ZHUZHU_ABI,
       functionName: 'mint',
       args: [BigInt(lots)],
-      value: parseEther(costBnbStr),
+      value: parseEther(costBnbExact),
       chainId: TARGET_CHAIN_ID,
     });
   };
@@ -421,7 +434,7 @@ export default function HomePage() {
    - 调用 mintOpen() 确认返回 true，且 mintedLots(我的地址) + ${promptLots} <= 10
 4. 执行认购交易：
    - 调用合约方法：mint(${promptLots})
-   - 携带精准 BNB 金额：${(promptLots * LOT_PRICE_BNB).toFixed(2)} BNB（每份 0.02 BNB，单地址上限 10 份 = 0.20 BNB）
+   - 携带精准 BNB 金额：${formatBnb(promptLots * LOT_PRICE_BNB)} BNB（每份 0.002 BNB，单地址上限 10 份 = 0.02 BNB）
    - 预计收到：${(promptLots * TOKENS_PER_LOT).toLocaleString('en-US')} ZHUZHU
 5. 注意事项：切勿向其他陌生地址转账，仅向上述合约调用 mint(uint256)。`;
 
@@ -442,14 +455,14 @@ export default function HomePage() {
             </h1>
 
             <p className="text-lg font-semibold text-pig-200 md:text-xl">
-              一份 0.02 BNB · 单地址打满 10 份 · 持币躺平享 BNB 分红
+              一份 0.002 BNB · 单地址打满 10 份（0.02 BNB）· 持币躺平享 BNB 分红
             </p>
 
             <p className="max-w-xl text-sm leading-relaxed text-slate-300 md:text-base">
               专为币安 AI 钱包（<code className="rounded bg-white/10 px-1.5 py-0.5 text-pig-300">.ai</code>{' '}
               Agent ID）打造的公平发射 Meme：总量 10,000 亿枚，每份{' '}
-              <strong className="text-white">0.02 BNB</strong>（得 4 亿枚），最高{' '}
-              <strong className="text-white">10 份（0.20 BNB）</strong>。1,500 份打满即自动组 PancakeSwap V2 LP 并永久打入黑洞销毁，3% 税率持续为持币人派发 BNB 分红。
+              <strong className="text-white">0.002 BNB</strong>（得 6,000 万枚），最高{' '}
+              <strong className="text-white">10 份（0.02 BNB = 6 亿枚）</strong>。10,000 份打满即自动组 PancakeSwap V2 LP 并永久打入黑洞销毁，3% 税率持续为持币人派发 BNB 分红。
             </p>
 
             <div className="flex flex-wrap gap-3 pt-2">
@@ -457,7 +470,7 @@ export default function HomePage() {
                 href="#mint"
                 className="rounded-2xl bg-pig-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-pig-500/25 transition hover:bg-pig-600"
               >
-                🐷 立即认购 Mint（0.02 BNB/份）
+                🐷 立即认购 Mint（0.002 BNB/份）
               </a>
               <a
                 href="#agent-mint"
@@ -479,21 +492,24 @@ export default function HomePage() {
             <div className="rounded-2xl border border-white/10 bg-black/40 p-4">
               <p className="text-xs text-slate-400">当前认购进度</p>
               <p className="mt-1.5 text-2xl font-extrabold text-white">
-                {mintedCount.toLocaleString()} <span className="text-sm font-normal text-slate-400">/ 1,500 份</span>
+                {mintedCount.toLocaleString()}{' '}
+                <span className="text-sm font-normal text-slate-400">
+                  / {TOTAL_LOTS.toLocaleString()} 份
+                </span>
               </p>
-              <p className="mt-1 text-xs text-pig-300">已募 {raisedBnbDisplay} / 30.00 BNB</p>
+              <p className="mt-1 text-xs text-pig-300">已募 {raisedBnbDisplay} / 20 BNB</p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-black/40 p-4">
               <p className="text-xs text-slate-400">单份固定价格</p>
-              <p className="mt-1.5 text-2xl font-extrabold text-pig-400">0.02 BNB</p>
-              <p className="mt-1 text-xs text-slate-300">每份得 400,000,000 枚</p>
+              <p className="mt-1.5 text-2xl font-extrabold text-pig-400">0.002 BNB</p>
+              <p className="mt-1 text-xs text-slate-300">每份得 60,000,000 枚</p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-black/40 p-4">
               <p className="text-xs text-slate-400">单地址打满上限</p>
               <p className="mt-1.5 text-2xl font-extrabold text-white">
-                10 份 <span className="text-sm font-semibold text-emerald-400">(0.20 BNB)</span>
+                10 份 <span className="text-sm font-semibold text-emerald-400">(0.02 BNB)</span>
               </p>
-              <p className="mt-1 text-xs text-slate-300">打满获 4,000,000,000 枚</p>
+              <p className="mt-1 text-xs text-slate-300">打满获 600,000,000 枚</p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-black/40 p-4">
               <p className="text-xs text-slate-400">分红池累计派发</p>
@@ -546,8 +562,8 @@ export default function HomePage() {
                     02
                   </span>
                   <p>
-                    <strong className="text-white">0.02 BNB / 份，单地址打满 10 份</strong>
-                    ：每份 0.02 BNB 获得 4 亿枚 $ZHUZHU；打满 10 份（0.20 BNB）直接获得 40 亿枚，全网共 1,500 份（30 BNB 硬顶）。
+                    <strong className="text-white">0.002 BNB / 份，单地址打满 10 份</strong>
+                    ：每份 0.002 BNB 获得 6,000 万枚 $ZHUZHU；打满 10 份（0.02 BNB）直接获得 6 亿枚，全网共 10,000 份（20 BNB 硬顶）。
                   </p>
                 </div>
                 <div className="flex gap-3">
@@ -556,7 +572,7 @@ export default function HomePage() {
                   </span>
                   <p>
                     <strong className="text-white">满额自动组池，LP 永久黑洞销毁</strong>
-                    ：第 1,500 份铸造完成瞬间，合约自动注入 100% 募集 BNB + 30% 代币到 PancakeSwap V2，并将 LP Token 直接销毁至黑洞地址。
+                    ：第 10,000 份铸造完成瞬间，合约自动注入 100% 募集 BNB + 30% 代币到 PancakeSwap V2，并将 LP Token 直接销毁至黑洞地址。
                   </p>
                 </div>
               </div>
@@ -716,7 +732,7 @@ export default function HomePage() {
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-400">全网认购进度</span>
                 <span className="font-bold text-white">
-                  {mintedCount} / {TOTAL_LOTS} 份 ({raisedBnbDisplay} / 30.00 BNB)
+                  {mintedCount.toLocaleString()} / {TOTAL_LOTS.toLocaleString()} 份 ({raisedBnbDisplay} / 20 BNB)
                 </span>
               </div>
               <div className="h-3 w-full overflow-hidden rounded-full bg-white/10">
@@ -741,7 +757,7 @@ export default function HomePage() {
             <div className="space-y-3 rounded-2xl border border-white/10 bg-black/35 p-4">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-bold text-white">选择认购份数</span>
-                <span className="text-xs text-pig-300">0.02 BNB / 份 · 最多 10 份</span>
+                <span className="text-xs text-pig-300">0.002 BNB / 份 · 最多 10 份</span>
               </div>
 
               <div className="flex items-center gap-3">
@@ -766,13 +782,22 @@ export default function HomePage() {
               </div>
 
               <div className="grid grid-cols-4 gap-2">
-                {[1, 3, 5, 10].map((preset) => {
-                  const disabled = maxSelectableLots > 0 ? preset > maxSelectableLots : false;
-                  const active = lots === preset;
+                {[1, 3, 5, 10].map((preset, idx) => {
+                  const isFillSlot = preset === 10;
+                  const fillRemainder = maxSelectableLots > 0 && maxSelectableLots < 10;
+                  const targetLots = isFillSlot && fillRemainder ? maxSelectableLots : preset;
+                  const disabled = maxSelectableLots > 0 ? targetLots > maxSelectableLots : isConnected;
+                  const active = lots === targetLots && (!isFillSlot || !fillRemainder || idx === 3);
+                  const label =
+                    isFillSlot && fillRemainder
+                      ? `打满余下 ${targetLots} 份`
+                      : preset === 10
+                        ? '打满 10 份'
+                        : `${targetLots} 份`;
                   return (
                     <button
-                      key={preset}
-                      onClick={() => !disabled && setLots(preset)}
+                      key={idx}
+                      onClick={() => !disabled && setLots(targetLots)}
                       disabled={disabled}
                       className={`rounded-xl border py-2 text-xs font-bold transition ${
                         active
@@ -780,9 +805,9 @@ export default function HomePage() {
                           : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10 disabled:opacity-30'
                       }`}
                     >
-                      {preset === 10 ? '打满 10 份' : `${preset} 份`}
+                      {label}
                       <span className="block text-[10px] font-normal text-slate-400">
-                        {(preset * LOT_PRICE_BNB).toFixed(2)} BNB
+                        {formatBnb(targetLots * LOT_PRICE_BNB)} BNB
                       </span>
                     </button>
                   );
@@ -819,7 +844,7 @@ export default function HomePage() {
                 : !mintOpen
                   ? '认购已结束'
                   : remainingUserLots <= 0
-                    ? '当前钱包已打满 10 份上限（0.20 BNB）'
+                    ? '当前钱包已打满 10 份上限（0.02 BNB）'
                     : !hasAgentId
                       ? '请先完成上方 .ai Agent ID 核验'
                       : isMintPending
@@ -894,12 +919,12 @@ export default function HomePage() {
             {
               step: 'STEP 01',
               title: '准备币安 AI 钱包与 BNB',
-              desc: '确认你的币安 AI 钱包已绑定 .ai Agent ID，并持有至少 0.02 ~ 0.21 BNB（含少量 Gas）。',
+              desc: '确认你的币安 AI 钱包已绑定 .ai Agent ID，并持有至少 0.002 ~ 0.025 BNB（含少量 Gas）。',
             },
             {
               step: 'STEP 02',
               title: '选择份数并复制 AI 口令',
-              desc: '在下方选择想要让 AI 自动打新的份数（默认打满 10 份 = 0.20 BNB），点击一键复制完整指令。',
+              desc: '在下方选择想要让 AI 自动打新的份数（默认打满 10 份 = 0.02 BNB），点击一键复制完整指令。',
             },
             {
               step: 'STEP 03',
@@ -932,7 +957,9 @@ export default function HomePage() {
                       : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
                   }`}
                 >
-                  {n === 10 ? '打满 10 份 (0.20 BNB)' : `${n} 份 (${(n * 0.02).toFixed(2)} BNB)`}
+                  {n === 10
+                    ? '打满 10 份 (0.02 BNB)'
+                    : `${n} 份 (${formatBnb(n * LOT_PRICE_BNB)} BNB)`}
                 </button>
               ))}
             </div>

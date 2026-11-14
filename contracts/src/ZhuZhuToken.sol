@@ -42,7 +42,7 @@ interface IAgentIdRegistry {
  * @title ZhuZhuToken ($ZHUZHU)
  * @notice BSC AI Agent Wallet exclusive meme launch:
  *         - Total supply: 1,000,000,000,000 (1T) $ZHUZHU
- *         - 60% Community Mint: 1,500 lots * 0.02 BNB = 30 BNB (max 10 lots / 0.20 BNB per wallet)
+ *         - 60% Community Mint: 10,000 lots * 0.002 BNB = 20 BNB (max 10 lots / 0.02 BNB per wallet)
  *         - 30% Auto DEX Liquidity paired with 100% raised BNB & LP burned to 0x...dEaD
  *         - 10% Community Reserve
  *         - 3% Buy/Sell tax: 1.5% BNB Dividends (holders >= 1,000,000 $ZHUZHU) + 1.5% Community
@@ -54,11 +54,11 @@ contract ZhuZhuToken is ERC20, ERC20Burnable, Ownable, ReentrancyGuard {
     uint256 public constant LP_ALLOC      =   300_000_000_000 ether; // 30%
     uint256 public constant RESERVE_ALLOC =   100_000_000_000 ether; // 10%
 
-    // ---- Mint Parameters (0.02 BNB / lot, max 10 lots = 0.20 BNB) ----
-    uint256 public constant LOT_PRICE           = 0.02 ether;
+    // ---- Mint Parameters (0.002 BNB / lot, max 10 lots = 0.02 BNB) ----
+    uint256 public constant LOT_PRICE           = 0.002 ether;
     uint256 public constant MAX_LOTS_PER_WALLET = 10;
-    uint256 public constant TOTAL_LOTS          = 1_500;
-    uint256 public constant TOKENS_PER_LOT      = 400_000_000 ether;
+    uint256 public constant TOTAL_LOTS          = 10_000;
+    uint256 public constant TOKENS_PER_LOT      = 60_000_000 ether;
 
     // ---- Tax Parameters (3% buy / 3% sell -> 1.5% BNB dividends + 1.5% community) ----
     uint256 public constant TAX_BPS = 300;
