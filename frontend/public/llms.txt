@@ -5,19 +5,20 @@
 
 ## Network & Endpoints
 
-- Chain Name: BSC Testnet (BNB Smart Chain Testnet)
-- Chain ID: 97
-- Native Gas Currency: BNB (tBNB on Testnet)
-- Public JSON-RPC: https://data-seed-prebsc-1-s1.bnbchain.org:8545
-- Block Explorer: https://testnet.bscscan.com
+- Chain Name: BNB Smart Chain (BSC Mainnet)
+- Chain ID: 56
+- Native Gas Currency: BNB
+- Public JSON-RPC: https://bsc-dataseed.bnbchain.org (fallbacks: https://bsc-dataseed1.defibit.io, https://bsc-rpc.publicnode.com)
+- Block Explorer: https://bscscan.com
 - Official Website: https://www.zhuzhubi.xyz/
 - Structured Agent Spec: https://www.zhuzhubi.xyz/agent.json
 
-## Verified Contract Addresses (Chain ID 97)
+## Verified Contract Addresses (Chain ID 56)
 
-- ZHUZHU_TOKEN (ZhuZhuToken ERC-20 + Fair Mint): 0x8Ff10c30196aef3026669076BE0635D46859d719
-- AGENT_ID_REGISTRY (AgentIdRegistry .ai Handle Registry): 0x898F7bf28aF01C7F2D7a800196665B9FEB7Ab205
-- DIVIDEND_TRACKER (ZhuZhuDividendTracker BNB Dividends): 0x34107435889b21697598203a77b21d790e4006cA
+- ZHUZHU_TOKEN (ZhuZhuToken ERC-20 + Fair Mint): 0xCD7d8B1407e036ee8B352f600CADD8F91C1578f5
+- AGENT_ID_REGISTRY (AgentIdRegistry .ai Handle Registry): 0x9fd5C0a14b71b169C770e6994155117afC680e8f
+- DIVIDEND_TRACKER (ZhuZhuDividendTracker BNB Dividends): 0xe4Ffc3d528E9dd3942655bc584611D9ad851c01c
+- PANCAKESWAP_V2_ROUTER: 0x10ED43C718714eb63d5aA57B78B54704E256024E
 - LP_BURN_ADDRESS (Dead Address): 0x000000000000000000000000000000000000dEaD
 
 ## Tokenomics & Fair Mint Parameters
@@ -37,34 +38,34 @@
 
 ## Autonomous Execution Protocol (Read -> Register if needed -> Mint)
 
-### Step 1: Preflight Read-Only Checks on ZHUZHU_TOKEN (0x8Ff10c30196aef3026669076BE0635D46859d719)
+### Step 1: Preflight Read-Only Checks on ZHUZHU_TOKEN (0xCD7d8B1407e036ee8B352f600CADD8F91C1578f5)
 1. `mintOpen()` [selector: 0x24bbd049] -> MUST return `true`.
 2. `lotsMinted()` -> check remaining global lots (`10000 - lotsMinted`).
 3. `mintedLots(botAddress)` [selector: 0x51ce9189] -> compute `remainingQuota = 10 - mintedLots`. Target `lots` MUST satisfy `1 <= lots <= min(remainingQuota, 10000 - lotsMinted)`.
-4. `hasAgentId(botAddress)` [selector: 0x4eab3ef2] -> returns `bool`.
+4. `hasAgentId(botAddress)` [selector: 0x4eab3ef2] -> returns `bool` (automatically recognizes official SPACE ID `.ai` holders on `0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F` as well as direct registrations).
 
 ### Step 2: Auto-Register .ai Agent ID (ONLY if `hasAgentId(botAddress) == false`)
-- Target Contract: AGENT_ID_REGISTRY (`0x898F7bf28aF01C7F2D7a800196665B9FEB7Ab205`)
+- Target Contract: AGENT_ID_REGISTRY (`0x9fd5C0a14b71b169C770e6994155117afC680e8f`)
 - Function: `register(string handle)` [selector: `0xf2c298be`, value: `0` wei]
 - Handle constraints: lowercase letters/numbers/hyphens, unique (e.g., `"zhuzhu-ai-8821"`). If transaction reverts with `handle taken`, retry with a fresh unique suffix.
 - Wait for confirmation and re-verify `ZHUZHU_TOKEN.hasAgentId(botAddress) == true`.
 
-### Step 3: Execute Fair Mint on ZHUZHU_TOKEN (`0x8Ff10c30196aef3026669076BE0635D46859d719`)
+### Step 3: Execute Fair Mint on ZHUZHU_TOKEN (`0xCD7d8B1407e036ee8B352f600CADD8F91C1578f5`)
 - Function: `mint(uint256 lots)` [selector: `0xa0712d68`]
 - Payable Value: `lots * 2000000000000000` wei (`0.002 BNB * lots`)
 - Example 1 — Mint 1 lot (0.002 BNB = 2000000000000000 wei -> 60,000,000 ZHUZHU):
-  - `to`: `0x8Ff10c30196aef3026669076BE0635D46859d719`
+  - `to`: `0xCD7d8B1407e036ee8B352f600CADD8F91C1578f5`
   - `value`: `2000000000000000`
   - `data`: `0xa0712d680000000000000000000000000000000000000000000000000000000000000001`
 - Example 2 — Mint max 10 lots (0.02 BNB = 20000000000000000 wei -> 600,000,000 ZHUZHU):
-  - `to`: `0x8Ff10c30196aef3026669076BE0635D46859d719`
+  - `to`: `0xCD7d8B1407e036ee8B352f600CADD8F91C1578f5`
   - `value`: `20000000000000000`
   - `data`: `0xa0712d68000000000000000000000000000000000000000000000000000000000000000a`
 
 ### Step 4: Claim BNB Dividends (After `tradingLive() == true`)
 - Read `DIVIDEND_TRACKER.withdrawable(botAddress)` [selector: `0xce513b6f`].
 - If `withdrawable > 0`:
-  - `to`: `0x34107435889b21697598203a77b21d790e4006cA`
+  - `to`: `0xe4Ffc3d528E9dd3942655bc584611D9ad851c01c`
   - `value`: `0`
   - `data`: `0x4e71d92d` (`claim()`)
 

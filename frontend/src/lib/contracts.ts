@@ -1,15 +1,15 @@
 import { parseAbi, type Address } from 'viem';
 
-export const TARGET_CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID || 97);
+export const TARGET_CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID || 56);
 
 export const ZHUZHU_TOKEN_ADDRESS = (process.env.NEXT_PUBLIC_ZHUZHU_TOKEN_ADDRESS ||
-  '0x0000000000000000000000000000000000000000') as Address;
+  '0xCD7d8B1407e036ee8B352f600CADD8F91C1578f5') as Address;
 
 export const AGENT_ID_REGISTRY_ADDRESS = (process.env.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS ||
-  '0x0000000000000000000000000000000000000000') as Address;
+  '0x9fd5C0a14b71b169C770e6994155117afC680e8f') as Address;
 
 export const DIVIDEND_TRACKER_ADDRESS = (process.env.NEXT_PUBLIC_DIVIDEND_TRACKER_ADDRESS ||
-  '0x0000000000000000000000000000000000000000') as Address;
+  '0xe4Ffc3d528E9dd3942655bc584611D9ad851c01c') as Address;
 
 export const DEAD_ADDRESS = '0x000000000000000000000000000000000000dEaD' as Address;
 
@@ -35,7 +35,7 @@ export function formatContractError(err: unknown): string {
     msg.includes('wrong network') ||
     msg.includes('unsupported chain')
   ) {
-    return `钱包当前网络不匹配，请先切换至 BSC Testnet (Chain ID ${TARGET_CHAIN_ID})`;
+    return `钱包当前网络不匹配，请先切换至 ${TARGET_CHAIN_ID === 97 ? 'BSC Testnet' : 'BNB Smart Chain 主网'} (Chain ID ${TARGET_CHAIN_ID})`;
   }
   if (msg.includes('insufficient funds') || msg.includes('exceeds the balance of the account')) {
     return '钱包 BNB 余额不足以支付认购金额或 Gas 费';

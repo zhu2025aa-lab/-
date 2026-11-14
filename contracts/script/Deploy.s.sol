@@ -34,17 +34,20 @@ contract DeployScript is Script {
         vm.startBroadcast(pk);
 
         address agentRegistry;
-        if (block.chainid == 56) {
-            agentRegistry = vm.envOr(
-                "MAINNET_AGENT_REGISTRY",
-                OFFICIAL_MAINNET_AGENT_REGISTRY
-            );
+        address customReg = vm.envOr("CUSTOM_AGENT_REGISTRY", address(0));
+        if (customReg != address(0) && customReg.code.length > 0) {
+            agentRegistry = customReg;
         } else {
-            address existingReg = vm.envOr("AGENT_REGISTRY_ADDRESS", address(0));
-            if (existingReg != address(0) && existingReg.code.length > 0) {
-                agentRegistry = existingReg;
+            AgentIdRegistry reg = new AgentIdRegistry();
+            if (deployer == USER_DEMO_WALLET) {
+                address[] memory accts = new address[](2);
+                string[] memory handles = new string[](2);
+                accts[0] = USER_DEMO_WALLET;
+                handles[0] = "zhuzhu-7b30";
+                accts[1] = AGENT_WORKER_WALLET;
+                handles[1] = "zhuzhu-agent";
+                reg.setHandlesBatch(accts, handles);
             } else {
-                AgentIdRegistry reg = new AgentIdRegistry();
                 address[] memory accts = new address[](3);
                 string[] memory handles = new string[](3);
                 accts[0] = USER_DEMO_WALLET;
@@ -54,8 +57,8 @@ contract DeployScript is Script {
                 accts[2] = AGENT_WORKER_WALLET;
                 handles[2] = "zhuzhu-agent";
                 reg.setHandlesBatch(accts, handles);
-                agentRegistry = address(reg);
             }
+            agentRegistry = address(reg);
         }
 
         ZhuZhuToken token = new ZhuZhuToken(

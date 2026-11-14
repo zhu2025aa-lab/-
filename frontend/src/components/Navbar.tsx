@@ -261,9 +261,9 @@ export function Navbar() {
         <div className="border-t border-white/10 bg-[#12121c] px-4 py-3">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-slate-300">
-              <span className="font-bold text-pig-300">测试网 .ai 身份自助绑定：</span>
-              正式主网自动校验 SPACE ID / 币安 AI 钱包{' '}
-              <code className="rounded bg-white/10 px-1">.ai</code>；测试网可一键免费注册体验。
+              <span className="font-bold text-pig-300">.ai 身份校验与自助注册：</span>
+              已持有 SPACE ID / 币安 AI 钱包 <code className="rounded bg-white/10 px-1">.ai</code>{' '}
+              的地址将自动识别；尚未注册的地址也可免费一键登记专属 Agent ID。
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <input

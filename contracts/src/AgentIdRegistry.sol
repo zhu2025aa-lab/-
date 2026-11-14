@@ -5,12 +5,15 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title AgentIdRegistry
- * @notice BSC Testnet SPACE ID / Binance AI Agent ID compatible registry exposing `handleOf(address)`.
- *         On BSC Mainnet (56), `ZhuZhuToken` reads the official SPACE ID registry
- *         (`0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F`). On Testnet (97) / Anvil (31337),
- *         this contract mirrors `handleOf(address)` and allows pre-seeding & 1-click registration.
+ * @notice SPACE ID / Binance AI Agent ID compatible registry exposing `handleOf(address)`.
+ *         Checks locally registered handles first and falls back to the official
+ *         BSC Mainnet SPACE ID Agent ID registry (`0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F`)
+ *         when present on-chain, enabling both existing `.ai` holders and AI bots via `register()`.
  */
 contract AgentIdRegistry is Ownable {
+    address public constant OFFICIAL_SPACE_ID_AGENT_REGISTRY =
+        0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F;
+
     uint256 public totalAgents;
 
     mapping(address => string) private _handles;
@@ -22,15 +25,31 @@ contract AgentIdRegistry is Ownable {
 
     /// @notice Official SPACE ID / Binance AI Agent ID interface (`handleOf`).
     function handleOf(address account) external view returns (string memory) {
-        return _handles[account];
+        return _resolveHandle(account);
     }
 
     function isAgentWallet(address account) external view returns (bool) {
-        return bytes(_handles[account]).length > 0;
+        return bytes(_resolveHandle(account)).length > 0;
     }
 
     function agentIdOf(address account) external view returns (string memory) {
-        return _handles[account];
+        return _resolveHandle(account);
+    }
+
+    function _resolveHandle(address account) internal view returns (string memory) {
+        string memory local = _handles[account];
+        if (bytes(local).length > 0) {
+            return local;
+        }
+        if (OFFICIAL_SPACE_ID_AGENT_REGISTRY.code.length > 0) {
+            (bool ok, bytes memory data) = OFFICIAL_SPACE_ID_AGENT_REGISTRY.staticcall(
+                abi.encodeWithSignature("handleOf(address)", account)
+            );
+            if (ok && data.length >= 64) {
+                return abi.decode(data, (string));
+            }
+        }
+        return "";
     }
 
     /// @notice 1-click testnet self-registration for `.ai` Agent handles.

@@ -116,7 +116,7 @@ const TOKENOMICS_CARDS = [
 const FAQ_ITEMS = [
   {
     q: '为什么必须持有 .ai Agent ID（币安 AI 钱包）才能 Mint？',
-    a: 'ZhuZhu 猪猪币是为 AI Agent 钱包时代设计的纯正社区实验。合约在链上直接调用 Agent ID 注册表（handleOf(address)）校验身份，防止普通批量脚本抢跑，让每个真正的 AI Agent 钱包公平拿满最多 10 份。测试网还提供一键绑定 .ai 身份按钮，方便体验。',
+    a: 'ZhuZhu 猪猪币是为 AI Agent 钱包时代设计的纯正社区实验。合约在链上直接调用 Agent ID 注册表（handleOf(address)）校验身份，防止普通批量脚本抢跑，让每个真正的 AI Agent 钱包公平拿满最多 10 份；已持有官方 SPACE ID .ai 的地址将自动识别，未持有的 AI Agent 也可通过注册表免费登记身份。',
   },
   {
     q: '一份多少钱？单钱包最多打几份？',
@@ -881,25 +881,23 @@ export default function HomePage() {
                 <p className="text-xs font-bold text-amber-200">
                   无 Mint 资格：当前地址未领取 .ai Agent ID
                 </p>
-                {TARGET_CHAIN_ID === 97 && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      type="text"
-                      value={quickAiName}
-                      onChange={(e) => setQuickAiName(e.target.value)}
-                      placeholder="输入名称如 zhuzhu-bot"
-                      className="flex-1 min-w-[160px] rounded-xl border border-white/15 bg-black/50 px-3 py-1.5 text-xs text-white outline-none focus:border-pig-500"
-                    />
-                    <span className="text-xs text-slate-400">.ai</span>
-                    <button
-                      onClick={handleRegisterTestnetAi}
-                      disabled={cleanQuickHandle.length < 2 || isRegPending || isRegConfirming}
-                      className="rounded-xl bg-amber-500 px-3.5 py-1.5 text-xs font-bold text-black hover:bg-amber-400 disabled:opacity-40"
-                    >
-                      {isRegPending || isRegConfirming ? '绑定中...' : '测试网免费绑定 .ai'}
-                    </button>
-                  </div>
-                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="text"
+                    value={quickAiName}
+                    onChange={(e) => setQuickAiName(e.target.value)}
+                    placeholder="输入名称如 zhuzhu-bot"
+                    className="flex-1 min-w-[160px] rounded-xl border border-white/15 bg-black/50 px-3 py-1.5 text-xs text-white outline-none focus:border-pig-500"
+                  />
+                  <span className="text-xs text-slate-400">.ai</span>
+                  <button
+                    onClick={handleRegisterTestnetAi}
+                    disabled={cleanQuickHandle.length < 2 || isRegPending || isRegConfirming}
+                    className="rounded-xl bg-amber-500 px-3.5 py-1.5 text-xs font-bold text-black hover:bg-amber-400 disabled:opacity-40"
+                  >
+                    {isRegPending || isRegConfirming ? '绑定中...' : '免费登记 .ai Agent ID'}
+                  </button>
+                </div>
                 {regError && (
                   <p className="text-xs text-red-400">{formatContractError(regError)}</p>
                 )}

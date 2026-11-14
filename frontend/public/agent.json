@@ -3,35 +3,38 @@
   "name": "ZhuZhu AI (猪猪币)",
   "symbol": "ZHUZHU",
   "decimals": 18,
-  "description": "AI-Agent-Only Fair Mint Token on BSC with 0.002 BNB/lot pricing, 10 lots/wallet cap, automatic PancakeSwap V2 LP creation + 0x...dEaD burn, and automatic 1.5% BNB dividend distribution.",
+  "description": "AI-Agent-Only Fair Mint Token on BNB Smart Chain with 0.002 BNB/lot pricing, 10 lots/wallet cap, automatic PancakeSwap V2 LP creation + 0x...dEaD burn, and automatic 1.5% BNB dividend distribution.",
   "website": "https://www.zhuzhubi.xyz/",
   "llmsTxt": "https://www.zhuzhubi.xyz/llms.txt",
   "network": {
-    "name": "BSC Testnet",
-    "chainId": 97,
+    "name": "BNB Smart Chain",
+    "chainId": 56,
     "nativeCurrency": {
       "name": "BNB",
-      "symbol": "tBNB",
+      "symbol": "BNB",
       "decimals": 18
     },
     "rpcUrls": [
-      "https://data-seed-prebsc-1-s1.bnbchain.org:8545"
+      "https://bsc-dataseed.bnbchain.org",
+      "https://bsc-dataseed1.defibit.io",
+      "https://bsc-rpc.publicnode.com"
     ],
-    "blockExplorerUrl": "https://testnet.bscscan.com"
+    "blockExplorerUrl": "https://bscscan.com"
   },
   "contracts": {
     "token": {
       "name": "ZhuZhuToken",
-      "address": "0x8Ff10c30196aef3026669076BE0635D46859d719"
+      "address": "0xCD7d8B1407e036ee8B352f600CADD8F91C1578f5"
     },
     "agentRegistry": {
       "name": "AgentIdRegistry",
-      "address": "0x898F7bf28aF01C7F2D7a800196665B9FEB7Ab205"
+      "address": "0x9fd5C0a14b71b169C770e6994155117afC680e8f"
     },
     "dividendTracker": {
       "name": "ZhuZhuDividendTracker",
-      "address": "0x34107435889b21697598203a77b21d790e4006cA"
+      "address": "0xe4Ffc3d528E9dd3942655bc584611D9ad851c01c"
     },
+    "pancakeRouter": "0x10ED43C718714eb63d5aA57B78B54704E256024E",
     "lpBurnAddress": "0x000000000000000000000000000000000000dEaD"
   },
   "mintConfig": {
@@ -65,19 +68,19 @@
       "action": "preflight",
       "calls": [
         {
-          "contract": "0x8Ff10c30196aef3026669076BE0635D46859d719",
+          "contract": "0xCD7d8B1407e036ee8B352f600CADD8F91C1578f5",
           "function": "mintOpen()",
           "selector": "0x24bbd049",
           "expect": true
         },
         {
-          "contract": "0x8Ff10c30196aef3026669076BE0635D46859d719",
+          "contract": "0xCD7d8B1407e036ee8B352f600CADD8F91C1578f5",
           "function": "mintedLots(address)",
           "selector": "0x51ce9189",
           "note": "Ensure mintedLots + requestedLots <= 10"
         },
         {
-          "contract": "0x8Ff10c30196aef3026669076BE0635D46859d719",
+          "contract": "0xCD7d8B1407e036ee8B352f600CADD8F91C1578f5",
           "function": "hasAgentId(address)",
           "selector": "0x4eab3ef2",
           "note": "If false, execute step 2 first"
@@ -89,7 +92,7 @@
       "action": "registerAgentIdIfMissing",
       "condition": "hasAgentId(botAddress) == false",
       "tx": {
-        "to": "0x898F7bf28aF01C7F2D7a800196665B9FEB7Ab205",
+        "to": "0x9fd5C0a14b71b169C770e6994155117afC680e8f",
         "function": "register(string)",
         "selector": "0xf2c298be",
         "valueWei": "0",
@@ -100,7 +103,7 @@
       "step": 3,
       "action": "mint",
       "tx": {
-        "to": "0x8Ff10c30196aef3026669076BE0635D46859d719",
+        "to": "0xCD7d8B1407e036ee8B352f600CADD8F91C1578f5",
         "function": "mint(uint256)",
         "selector": "0xa0712d68",
         "valueFormula": "lots * 2000000000000000 wei",
@@ -123,7 +126,7 @@
       "action": "claimDividend",
       "condition": "tradingLive() == true && withdrawable(botAddress) > 0",
       "tx": {
-        "to": "0x34107435889b21697598203a77b21d790e4006cA",
+        "to": "0xe4Ffc3d528E9dd3942655bc584611D9ad851c01c",
         "function": "claim()",
         "selector": "0x4e71d92d",
         "valueWei": "0",
