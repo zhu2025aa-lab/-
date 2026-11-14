@@ -20,6 +20,7 @@ import {
 } from '@/lib/contracts';
 import {
   BROWSER_PLUGIN_CONNECTOR_ID,
+  SIGNER_CONNECTOR_ID,
   WATCH_CONNECTOR_ID,
   detectBrowserWallets,
   ensureTargetBscChain,
@@ -60,9 +61,12 @@ export function Navbar() {
 
   const isWrongChain = isConnected && chainId !== TARGET_CHAIN_ID;
 
-  // Clear any legacy watch-mode connector session automatically
+  // Clear any legacy watch-mode or builtin signer connector session automatically
   useEffect(() => {
-    if (isConnected && connector?.id === WATCH_CONNECTOR_ID) {
+    if (
+      isConnected &&
+      (connector?.id === WATCH_CONNECTOR_ID || connector?.id === SIGNER_CONNECTOR_ID)
+    ) {
       disconnectAsync().catch(() => {});
     }
   }, [isConnected, connector?.id, disconnectAsync]);
@@ -240,7 +244,7 @@ export function Navbar() {
                   onClick={() => setShowBindModal((v) => !v)}
                   className="rounded-xl border border-amber-500/40 bg-amber-500/15 px-2.5 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/25"
                 >
-                  🪪 测试网绑定 .ai
+                  🪪 绑定 .ai 身份
                 </button>
               )
             )}
@@ -261,9 +265,9 @@ export function Navbar() {
         <div className="border-t border-white/10 bg-[#12121c] px-4 py-3">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-slate-300">
-              <span className="font-bold text-pig-300">.ai 身份校验与自助注册：</span>
-              已持有 SPACE ID / 币安 AI 钱包 <code className="rounded bg-white/10 px-1">.ai</code>{' '}
-              的地址将自动识别；尚未注册的地址也可免费一键登记专属 Agent ID。
+              <span className="font-bold text-pig-300">.ai 身份绑定：</span>
+              输入自定义名称（至少 2 个字符）即可在链上领取专属{' '}
+              <code className="rounded bg-white/10 px-1">.ai</code> Agent ID 并参与认购。
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <input
@@ -279,7 +283,7 @@ export function Navbar() {
                 disabled={!validHandle || isPending || isConfirming || isSwitching}
                 className="rounded-xl bg-pig-500 px-4 py-1.5 text-xs font-bold text-white hover:bg-pig-600 disabled:opacity-40"
               >
-                {isPending || isConfirming ? '注册中...' : '一键绑定 .ai'}
+                {isPending || isConfirming ? '链上确认中...' : '一键领取 .ai'}
               </button>
               <button
                 onClick={() => setShowBindModal(false)}

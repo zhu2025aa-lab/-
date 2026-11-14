@@ -23,7 +23,7 @@ import {
   ZHUZHU_TOKEN_ADDRESS,
   formatContractError,
 } from '@/lib/contracts';
-import { WATCH_CONNECTOR_ID, openWalletModal } from '@/lib/wagmi';
+import { SIGNER_CONNECTOR_ID, WATCH_CONNECTOR_ID, openWalletModal } from '@/lib/wagmi';
 
 const EXPLORER =
   TARGET_CHAIN_ID === 97 ? 'https://testnet.bscscan.com' : 'https://bscscan.com';
@@ -116,7 +116,7 @@ const TOKENOMICS_CARDS = [
 const FAQ_ITEMS = [
   {
     q: '为什么必须持有 .ai Agent ID（币安 AI 钱包）才能 Mint？',
-    a: 'ZhuZhu 猪猪币是为 AI Agent 钱包时代设计的纯正社区实验。合约在链上直接调用 Agent ID 注册表（handleOf(address)）校验身份，防止普通批量脚本抢跑，让每个真正的 AI Agent 钱包公平拿满最多 10 份；已持有官方 SPACE ID .ai 的地址将自动识别，未持有的 AI Agent 也可通过注册表免费登记身份。',
+    a: 'ZhuZhu 猪猪币是为 AI Agent 钱包时代设计的纯正社区实验。合约在链上直接调用 Agent ID 注册表（handleOf(address)）校验身份，防止普通批量脚本抢跑，让每个真正的 AI Agent 钱包公平拿满最多 10 份；已持有官方 SPACE ID .ai 的地址将自动识别，未持有的 AI 钱包也可通过输入名字在链上领取专属 .ai 身份后参与。',
   },
   {
     q: '一份多少钱？单钱包最多打几份？',
@@ -152,7 +152,10 @@ export default function HomePage() {
   const isWrongChain = isConnected && chainId !== TARGET_CHAIN_ID;
 
   useEffect(() => {
-    if (isConnected && connector?.id === WATCH_CONNECTOR_ID) {
+    if (
+      isConnected &&
+      (connector?.id === WATCH_CONNECTOR_ID || connector?.id === SIGNER_CONNECTOR_ID)
+    ) {
       disconnectAsync().catch(() => {});
     }
   }, [isConnected, connector?.id, disconnectAsync]);
@@ -464,7 +467,7 @@ export default function HomePage() {
 
   const cleanQuickHandle = quickAiName.trim().replace(/\.ai$/i, '');
 
-  const handleRegisterTestnetAi = async () => {
+  const handleRegisterAi = async () => {
     if (!address || cleanQuickHandle.length < 2) return;
     if (isWrongChain) {
       try {
@@ -881,21 +884,25 @@ export default function HomePage() {
                 <p className="text-xs font-bold text-amber-200">
                   无 Mint 资格：当前地址未领取 .ai Agent ID
                 </p>
+                <p className="text-xs text-slate-300">
+                  输入自定义名称（至少 2 个字符）即可在链上领取 <code className="rounded bg-white/10 px-1">.ai</code>{' '}
+                  Agent ID，领取确认后即可直接认购：
+                </p>
                 <div className="flex flex-wrap items-center gap-2">
                   <input
                     type="text"
                     value={quickAiName}
                     onChange={(e) => setQuickAiName(e.target.value)}
-                    placeholder="输入名称如 zhuzhu-bot"
+                    placeholder="输入名称（如 my-ai-88）"
                     className="flex-1 min-w-[160px] rounded-xl border border-white/15 bg-black/50 px-3 py-1.5 text-xs text-white outline-none focus:border-pig-500"
                   />
                   <span className="text-xs text-slate-400">.ai</span>
                   <button
-                    onClick={handleRegisterTestnetAi}
+                    onClick={handleRegisterAi}
                     disabled={cleanQuickHandle.length < 2 || isRegPending || isRegConfirming}
                     className="rounded-xl bg-amber-500 px-3.5 py-1.5 text-xs font-bold text-black hover:bg-amber-400 disabled:opacity-40"
                   >
-                    {isRegPending || isRegConfirming ? '绑定中...' : '免费登记 .ai Agent ID'}
+                    {isRegPending || isRegConfirming ? '链上领取中...' : '输入名字领取 .ai'}
                   </button>
                 </div>
                 {regError && (
@@ -928,7 +935,7 @@ export default function HomePage() {
                   <div>
                     <span className="text-slate-400 block">.ai 身份</span>
                     <span className={botHasAgentId ? 'font-bold text-emerald-300' : 'text-amber-300'}>
-                      {botHasAgentId ? `✓ ${botFormattedHandle || '已认证'}` : '未注册（可自动注册）'}
+                      {botHasAgentId ? `✓ ${botFormattedHandle || '已认证'}` : '未领取（可输入名字领取）'}
                     </span>
                   </div>
                   <div>

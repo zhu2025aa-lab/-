@@ -203,7 +203,7 @@ export async function ensureTargetBscChain(provider: EIP1193Provider, targetChai
   const afterHex = (await provider.request({ method: 'eth_chainId' })) as string;
   if (Number(afterHex) !== targetChainId) {
     throw new Error(
-      targetChainId === 97 ? '请切换到 BSC Testnet 测试网' : '请切换到 BNB Smart Chain 主网'
+      targetChainId === 97 ? '请切换到 BSC Testnet' : '请切换到 BNB Smart Chain 主网'
     );
   }
 }
@@ -329,7 +329,7 @@ function makeCustomConnector({
     async connect({ withCapabilities } = {}) {
       const addr = getAddressForConnect();
       if (!addr) {
-        throw new Error('未找到可用钱包地址或测试私钥');
+        throw new Error('未找到可用钱包地址');
       }
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(ACTIVE_CUSTOM_STORAGE_KEY, id);
@@ -363,7 +363,7 @@ function makeCustomConnector({
     },
     async isAuthorized() {
       if (typeof window === 'undefined' || !getAddressForConnect()) return false;
-      if (id === WATCH_CONNECTOR_ID) {
+      if (id === WATCH_CONNECTOR_ID || (id === SIGNER_CONNECTOR_ID && activeChain.id === 56)) {
         if (window.localStorage.getItem(ACTIVE_CUSTOM_STORAGE_KEY) === id) {
           window.localStorage.removeItem(ACTIVE_CUSTOM_STORAGE_KEY);
         }
@@ -409,7 +409,7 @@ function watchAddressConnector() {
           method === 'eth_signTypedData_v4'
         ) {
           throw new Error(
-            '当前为地址免密直连模式（无该地址私钥），无法签名发送交易；请点击「⚡ 切换内置可签名测试钱包」直接体验链上交易，或在装有该钱包插件的浏览器中打开页面'
+            '当前为地址免密直连模式（无该地址私钥），无法签名发送交易；请点击「连接钱包 ↗」在装有该钱包插件的浏览器中打开页面'
           );
         }
         return undefined;
@@ -420,12 +420,12 @@ function watchAddressConnector() {
 function builtinSignerConnector() {
   return makeCustomConnector({
     id: SIGNER_CONNECTOR_ID,
-    name: '内置测试网 AI 钱包 (可真实发交易)',
+    name: '内置 AI 钱包 (可真实发交易)',
     type: 'builtin-signer',
     getAddressForConnect: () => demoAccount?.address ?? null,
     buildProvider: () =>
       createEip1193Provider(async (method, params) => {
-        if (!demoAccount) throw new Error('未配置内置测试网签名钱包私钥');
+        if (!demoAccount) throw new Error('未配置签名钱包私钥');
         const walletClient = createWalletClient({
           account: demoAccount,
           chain: activeChain,
