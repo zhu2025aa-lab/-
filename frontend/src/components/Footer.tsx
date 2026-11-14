@@ -16,7 +16,7 @@ export function Footer() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2 font-bold text-slate-200">
             <span className="text-lg">🐷</span>
-            <span>猪猪币 ZHUZHU · BNB Chain AI Agent Experiment</span>
+            <span>猪猪币 ZHUZHU · zhuzhubi.xyz · BNB Chain AI Agent Experiment</span>
           </div>
           <div className="flex flex-wrap gap-4 text-[11px]">
             <a

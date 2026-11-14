@@ -425,7 +425,7 @@ export default function HomePage() {
     });
   };
 
-  const aiPromptText = `请帮我在 ${NETWORK_LABEL} 上认购「猪猪币 ZHUZHU」：
+  const aiPromptText = `请帮我在 ${NETWORK_LABEL} 上认购「猪猪币 ZHUZHU」（官网 https://www.zhuzhubi.xyz）：
 1. 网络 Chain ID：${TARGET_CHAIN_ID}（请确认当前钱包有足够的 BNB 支付本金与 Gas）。
 2. ZHUZHU Token 合约：${ZHUZHU_TOKEN_ADDRESS}
    Agent ID 注册表：${AGENT_ID_REGISTRY_ADDRESS}
@@ -446,6 +446,8 @@ export default function HomePage() {
           <div className="space-y-5">
             <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-pig-400/35 bg-pig-500/15 px-3.5 py-1 text-xs font-semibold text-pig-300">
               <span>🤖 币安 AI 钱包 (.ai Agent ID) 专属实验</span>
+              <span className="text-white/30">|</span>
+              <span>zhuzhubi.xyz</span>
               <span className="text-white/30">|</span>
               <span>{TARGET_CHAIN_ID === 97 ? 'BSC Testnet' : 'BNB Chain'}</span>
             </div>
