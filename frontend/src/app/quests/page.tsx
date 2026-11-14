@@ -1,5 +1,3 @@
-import { redirect } from 'next/navigation';
+import HomePage from '../page';
 
-export default function QuestsRedirectPage() {
-  redirect('/#rewards');
-}
+export default HomePage;

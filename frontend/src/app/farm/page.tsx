@@ -1,5 +1,3 @@
-import { redirect } from 'next/navigation';
+import HomePage from '../page';
 
-export default function FarmRedirectPage() {
-  redirect('/#agent-mint');
-}
+export default HomePage;

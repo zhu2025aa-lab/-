@@ -1,5 +1,3 @@
-import { redirect } from 'next/navigation';
+import HomePage from '../page';
 
-export default function BadgeRedirectPage() {
-  redirect('/#mint');
-}
+export default HomePage;

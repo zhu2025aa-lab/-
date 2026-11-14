@@ -4,6 +4,9 @@ import type { NextConfig } from 'next';
 const cuerQrCodeShimPath = path.resolve(__dirname, 'src/lib/cuer-qrcode-shim.ts');
 
 const nextConfig: NextConfig = {
+  output: 'export',
+  trailingSlash: true,
+  images: { unoptimized: true },
   reactStrictMode: true,
   webpack: (config, { webpack }) => {
     config.externals.push('pino-pretty', 'lokijs', 'encoding');
