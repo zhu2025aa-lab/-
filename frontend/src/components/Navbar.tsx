@@ -234,19 +234,10 @@ export function Navbar() {
               </button>
             )}
 
-            {isConnected && !isWrongChain && (
-              hasAgentId ? (
-                <span className="hidden sm:inline-flex items-center gap-1 rounded-xl border border-emerald-500/35 bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-300">
-                  ✓ {formattedHandle}
-                </span>
-              ) : (
-                <button
-                  onClick={() => setShowBindModal((v) => !v)}
-                  className="rounded-xl border border-amber-500/40 bg-amber-500/15 px-2.5 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/25"
-                >
-                  🪪 绑定 .ai 身份
-                </button>
-              )
+            {isConnected && !isWrongChain && hasAgentId && (
+              <span className="hidden sm:inline-flex items-center gap-1 rounded-xl border border-emerald-500/35 bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-300">
+                ✓ {formattedHandle}
+              </span>
             )}
 
             <button
