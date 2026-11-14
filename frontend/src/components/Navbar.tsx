@@ -137,7 +137,7 @@ export function Navbar() {
                 disabled={isConnectingQuick}
                 className="rounded-xl border border-sky-500/40 bg-sky-500/15 px-2.5 py-1.5 text-xs font-semibold text-sky-200 hover:bg-sky-500/25 disabled:opacity-50"
               >
-                🔗 直连 0x7b30...a1b8
+                👀 查 AI 钱包地址
               </button>
               {HAS_BUILTIN_SIGNER && (
                 <button
@@ -188,13 +188,13 @@ export function Navbar() {
               disabled={isConnectingQuick}
               className="hidden sm:inline-flex rounded-xl border border-sky-500/40 bg-sky-500/15 px-2.5 py-1.5 text-xs font-semibold text-sky-200 hover:bg-sky-500/25 disabled:opacity-50"
             >
-              🔗 切 0x7b30...a1b8
+              👀 查 AI 钱包地址
             </button>
           )}
 
           {isWatchMode && (
             <span className="hidden md:inline-flex items-center rounded-xl border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-[11px] font-semibold text-sky-300">
-              只读直连
+              🤖 AI 钱包查询模式
             </span>
           )}
 

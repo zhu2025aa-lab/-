@@ -1,0 +1,74 @@
+# ZhuZhu AI ($ZHUZHU) — AI-Agent-Only Fair Mint Protocol
+
+> Machine-readable guide for Binance AI Wallet, OpenClaw, ElizaOS, AgentKit, and autonomous Web3 trading agents.
+> Structured JSON manifest: https://www.zhuzhubi.xyz/agent.json
+
+## Network & Endpoints
+
+- Chain Name: BSC Testnet (BNB Smart Chain Testnet)
+- Chain ID: 97
+- Native Gas Currency: BNB (tBNB on Testnet)
+- Public JSON-RPC: https://data-seed-prebsc-1-s1.bnbchain.org:8545
+- Block Explorer: https://testnet.bscscan.com
+- Official Website: https://www.zhuzhubi.xyz/
+- Structured Agent Spec: https://www.zhuzhubi.xyz/agent.json
+
+## Verified Contract Addresses (Chain ID 97)
+
+- ZHUZHU_TOKEN (ZhuZhuToken ERC-20 + Fair Mint): 0x8Ff10c30196aef3026669076BE0635D46859d719
+- AGENT_ID_REGISTRY (AgentIdRegistry .ai Handle Registry): 0x898F7bf28aF01C7F2D7a800196665B9FEB7Ab205
+- DIVIDEND_TRACKER (ZhuZhuDividendTracker BNB Dividends): 0x34107435889b21697598203a77b21d790e4006cA
+- LP_BURN_ADDRESS (Dead Address): 0x000000000000000000000000000000000000dEaD
+
+## Tokenomics & Fair Mint Parameters
+
+- Token Symbol: ZHUZHU
+- Decimals: 18
+- Total Supply: 1,000,000,000,000 ZHUZHU (1 Trillion)
+  - 60% Fair Mint Pool: 600,000,000,000 ZHUZHU (10,000 lots total)
+  - 30% Auto-LP Pool: 300,000,000,000 ZHUZHU paired with 100% raised BNB on PancakeSwap V2, LP tokens burned directly to 0x0000...dEaD
+  - 10% Community & AI Agent Reserve: 100,000,000,000 ZHUZHU
+- Price Per Lot: 0.002 BNB (2000000000000000 wei)
+- Tokens Per Lot: 60,000,000 ZHUZHU
+- Max Lots Per Wallet: 10 lots = 0.02 BNB (20000000000000000 wei) = 600,000,000 ZHUZHU
+- Total Hardcap: 10,000 lots = 20 BNB
+- Post-Launch Trading Tax: 3% (1.5% auto-swapped to BNB dividends via DIVIDEND_TRACKER, 1.5% ecosystem/marketing)
+- Minimum Balance for BNB Dividends: 1,000,000 ZHUZHU (1000000000000000000000000 wei)
+
+## Autonomous Execution Protocol (Read -> Register if needed -> Mint)
+
+### Step 1: Preflight Read-Only Checks on ZHUZHU_TOKEN (0x8Ff10c30196aef3026669076BE0635D46859d719)
+1. `mintOpen()` [selector: 0x24bbd049] -> MUST return `true`.
+2. `lotsMinted()` -> check remaining global lots (`10000 - lotsMinted`).
+3. `mintedLots(botAddress)` [selector: 0x51ce9189] -> compute `remainingQuota = 10 - mintedLots`. Target `lots` MUST satisfy `1 <= lots <= min(remainingQuota, 10000 - lotsMinted)`.
+4. `hasAgentId(botAddress)` [selector: 0x4eab3ef2] -> returns `bool`.
+
+### Step 2: Auto-Register .ai Agent ID (ONLY if `hasAgentId(botAddress) == false`)
+- Target Contract: AGENT_ID_REGISTRY (`0x898F7bf28aF01C7F2D7a800196665B9FEB7Ab205`)
+- Function: `register(string handle)` [selector: `0xf2c298be`, value: `0` wei]
+- Handle constraints: lowercase letters/numbers/hyphens, unique (e.g., `"zhuzhu-ai-8821"`). If transaction reverts with `handle taken`, retry with a fresh unique suffix.
+- Wait for confirmation and re-verify `ZHUZHU_TOKEN.hasAgentId(botAddress) == true`.
+
+### Step 3: Execute Fair Mint on ZHUZHU_TOKEN (`0x8Ff10c30196aef3026669076BE0635D46859d719`)
+- Function: `mint(uint256 lots)` [selector: `0xa0712d68`]
+- Payable Value: `lots * 2000000000000000` wei (`0.002 BNB * lots`)
+- Example 1 — Mint 1 lot (0.002 BNB = 2000000000000000 wei -> 60,000,000 ZHUZHU):
+  - `to`: `0x8Ff10c30196aef3026669076BE0635D46859d719`
+  - `value`: `2000000000000000`
+  - `data`: `0xa0712d680000000000000000000000000000000000000000000000000000000000000001`
+- Example 2 — Mint max 10 lots (0.02 BNB = 20000000000000000 wei -> 600,000,000 ZHUZHU):
+  - `to`: `0x8Ff10c30196aef3026669076BE0635D46859d719`
+  - `value`: `20000000000000000`
+  - `data`: `0xa0712d68000000000000000000000000000000000000000000000000000000000000000a`
+
+### Step 4: Claim BNB Dividends (After `tradingLive() == true`)
+- Read `DIVIDEND_TRACKER.withdrawable(botAddress)` [selector: `0xce513b6f`].
+- If `withdrawable > 0`:
+  - `to`: `0x34107435889b21697598203a77b21d790e4006cA`
+  - `value`: `0`
+  - `data`: `0x4e71d92d` (`claim()`)
+
+## Safety Guardrails for Agents
+1. NEVER transfer BNB directly to EOAs or unknown contracts.
+2. Always match exact `value = lots * 2000000000000000` wei when calling `mint(lots)`.
+3. Keep extra BNB (e.g., ~0.002 BNB) in the bot wallet for gas on `register`, `mint`, and `claim`.

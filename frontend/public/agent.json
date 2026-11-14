@@ -1,0 +1,159 @@
+{
+  "schemaVersion": "1.0.0",
+  "name": "ZhuZhu AI (猪猪币)",
+  "symbol": "ZHUZHU",
+  "decimals": 18,
+  "description": "AI-Agent-Only Fair Mint Token on BSC with 0.002 BNB/lot pricing, 10 lots/wallet cap, automatic PancakeSwap V2 LP creation + 0x...dEaD burn, and automatic 1.5% BNB dividend distribution.",
+  "website": "https://www.zhuzhubi.xyz/",
+  "llmsTxt": "https://www.zhuzhubi.xyz/llms.txt",
+  "network": {
+    "name": "BSC Testnet",
+    "chainId": 97,
+    "nativeCurrency": {
+      "name": "BNB",
+      "symbol": "tBNB",
+      "decimals": 18
+    },
+    "rpcUrls": [
+      "https://data-seed-prebsc-1-s1.bnbchain.org:8545"
+    ],
+    "blockExplorerUrl": "https://testnet.bscscan.com"
+  },
+  "contracts": {
+    "token": {
+      "name": "ZhuZhuToken",
+      "address": "0x8Ff10c30196aef3026669076BE0635D46859d719"
+    },
+    "agentRegistry": {
+      "name": "AgentIdRegistry",
+      "address": "0x898F7bf28aF01C7F2D7a800196665B9FEB7Ab205"
+    },
+    "dividendTracker": {
+      "name": "ZhuZhuDividendTracker",
+      "address": "0x34107435889b21697598203a77b21d790e4006cA"
+    },
+    "lpBurnAddress": "0x000000000000000000000000000000000000dEaD"
+  },
+  "mintConfig": {
+    "requiresAgentId": true,
+    "lotPriceBnb": "0.002",
+    "lotPriceWei": "2000000000000000",
+    "tokensPerLot": "60000000",
+    "tokensPerLotWei": "60000000000000000000000000",
+    "maxLotsPerWallet": 10,
+    "maxCostPerWalletBnb": "0.02",
+    "maxCostPerWalletWei": "20000000000000000",
+    "totalLots": 10000,
+    "hardcapBnb": "20",
+    "totalSupply": "1000000000000",
+    "distribution": {
+      "fairMintPct": 60,
+      "autoLpBurnPct": 30,
+      "ecosystemReservePct": 10
+    }
+  },
+  "postLaunch": {
+    "tradingTaxPct": 3,
+    "bnbDividendTaxPct": 1.5,
+    "marketingTaxPct": 1.5,
+    "minDividendHoldingTokens": "1000000",
+    "minDividendHoldingWei": "1000000000000000000000000"
+  },
+  "executionFlow": [
+    {
+      "step": 1,
+      "action": "preflight",
+      "calls": [
+        {
+          "contract": "0x8Ff10c30196aef3026669076BE0635D46859d719",
+          "function": "mintOpen()",
+          "selector": "0x24bbd049",
+          "expect": true
+        },
+        {
+          "contract": "0x8Ff10c30196aef3026669076BE0635D46859d719",
+          "function": "mintedLots(address)",
+          "selector": "0x51ce9189",
+          "note": "Ensure mintedLots + requestedLots <= 10"
+        },
+        {
+          "contract": "0x8Ff10c30196aef3026669076BE0635D46859d719",
+          "function": "hasAgentId(address)",
+          "selector": "0x4eab3ef2",
+          "note": "If false, execute step 2 first"
+        }
+      ]
+    },
+    {
+      "step": 2,
+      "action": "registerAgentIdIfMissing",
+      "condition": "hasAgentId(botAddress) == false",
+      "tx": {
+        "to": "0x898F7bf28aF01C7F2D7a800196665B9FEB7Ab205",
+        "function": "register(string)",
+        "selector": "0xf2c298be",
+        "valueWei": "0",
+        "note": "Pass a unique lowercase handle e.g. 'zhuzhu-ai-001'. Wait for confirmation before step 3."
+      }
+    },
+    {
+      "step": 3,
+      "action": "mint",
+      "tx": {
+        "to": "0x8Ff10c30196aef3026669076BE0635D46859d719",
+        "function": "mint(uint256)",
+        "selector": "0xa0712d68",
+        "valueFormula": "lots * 2000000000000000 wei",
+        "examples": {
+          "mint_1_lot": {
+            "lots": 1,
+            "valueWei": "2000000000000000",
+            "data": "0xa0712d680000000000000000000000000000000000000000000000000000000000000001"
+          },
+          "mint_10_lots": {
+            "lots": 10,
+            "valueWei": "20000000000000000",
+            "data": "0xa0712d68000000000000000000000000000000000000000000000000000000000000000a"
+          }
+        }
+      }
+    },
+    {
+      "step": 4,
+      "action": "claimDividend",
+      "condition": "tradingLive() == true && withdrawable(botAddress) > 0",
+      "tx": {
+        "to": "0x34107435889b21697598203a77b21d790e4006cA",
+        "function": "claim()",
+        "selector": "0x4e71d92d",
+        "valueWei": "0",
+        "data": "0x4e71d92d"
+      }
+    }
+  ],
+  "abiSignatures": {
+    "token": [
+      "function mint(uint256 lots) payable",
+      "function mintOpen() view returns (bool)",
+      "function tradingLive() view returns (bool)",
+      "function lotsMinted() view returns (uint256)",
+      "function mintedLots(address account) view returns (uint256)",
+      "function hasAgentId(address account) view returns (bool)",
+      "function agentHandleOf(address account) view returns (string)",
+      "function balanceOf(address account) view returns (uint256)",
+      "function pair() view returns (address)"
+    ],
+    "agentRegistry": [
+      "function register(string handle)",
+      "function handleOf(address account) view returns (string)",
+      "function totalAgents() view returns (uint256)"
+    ],
+    "dividendTracker": [
+      "function claim() returns (uint256)",
+      "function withdrawable(address account) view returns (uint256)",
+      "function withdrawn(address account) view returns (uint256)",
+      "function totalDistributed() view returns (uint256)",
+      "function isEligible(address account) view returns (bool)"
+    ]
+  }
+}

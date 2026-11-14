@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { formatEther, isAddress, parseEther, type Address } from 'viem';
+import { useConnectModal } from '@rainbow-me/rainbowkit';
+import { encodeFunctionData, formatEther, isAddress, parseEther, type Address } from 'viem';
 import {
   useAccount,
   useBalance,
@@ -31,6 +32,7 @@ import {
   SIGNER_CONNECTOR_ID,
   WATCH_CONNECTOR_ID,
   connectQuickWallet,
+  setWatchAddress,
 } from '@/lib/wagmi';
 
 const EXPLORER =
@@ -46,6 +48,55 @@ const MAX_LOTS_PER_WALLET = 10;
 
 function formatBnb(n: number) {
   return Number(n.toFixed(4)).toString();
+}
+
+/** Build structured mint instructions (with auto .ai registration and raw calldata) for AI bots. */
+function buildAiMintPrompt(targetLots: number): string {
+  const costBnb = formatBnb(targetLots * LOT_PRICE_BNB);
+  const valueWei = parseEther((targetLots * LOT_PRICE_BNB).toFixed(4)).toString();
+  const calldata = encodeFunctionData({
+    abi: ZHUZHU_ABI,
+    functionName: 'mint',
+    args: [BigInt(targetLots)],
+  });
+  return `请帮我作为 AI Agent 在 ${NETWORK_LABEL} 上全自动认购「猪猪币 ZHUZHU」（官网 https://www.zhuzhubi.xyz）：
+1. 网络与规范清单：
+   - Chain ID：${TARGET_CHAIN_ID}（请确认钱包有足够的本金 BNB + Gas BNB）
+   - 机器可读规范：https://www.zhuzhubi.xyz/agent.json （说明文档：https://www.zhuzhubi.xyz/llms.txt）
+2. 官方唯一合约地址：
+   - ZHUZHU Token 主合约：${ZHUZHU_TOKEN_ADDRESS}
+   - Agent ID 注册表：${AGENT_ID_REGISTRY_ADDRESS}
+   - BNB 分红合约：${DIVIDEND_TRACKER_ADDRESS}
+3. 执行前只读安全核验：
+   - 调用 ZHUZHU_TOKEN.mintOpen() 确认返回 true
+   - 调用 ZHUZHU_TOKEN.mintedLots(我的地址) 确认当前已购份数 + ${targetLots} <= 10
+   - 调用 ZHUZHU_TOKEN.hasAgentId(我的地址)：
+     · 若返回 false：先向 AgentIdRegistry（${AGENT_ID_REGISTRY_ADDRESS}）免费调用 register("zhuzhu-ai-随机数")（value=0）注册不重复的 .ai 身份，等上链确认后再继续下一步；
+     · 若返回 true：直接执行第 4 步 Mint。
+4. 发送认购交易（仅向 ZHUZHU_TOKEN 合约发起）：
+   - 目标合约：${ZHUZHU_TOKEN_ADDRESS}
+   - 调用方法：mint(${targetLots})
+   - 精准 BNB 金额：${costBnb} BNB（${valueWei} wei；每份 0.002 BNB，单地址上限 10 份 = 0.02 BNB）
+   - Raw Calldata (Hex)：${calldata}
+   - 预计获得：${(targetLots * TOKENS_PER_LOT).toLocaleString('en-US')} ZHUZHU
+5. 安全规则：切勿向任何陌生个人地址转账 BNB，务必核对目标地址为上述唯一主合约。`;
+}
+
+/** Build structured BNB dividend claim instructions and calldata for AI bots. */
+function buildAiClaimPrompt(): string {
+  const claimCalldata = encodeFunctionData({
+    abi: DIVIDEND_TRACKER_ABI,
+    functionName: 'claim',
+  });
+  return `请帮我在 ${NETWORK_LABEL}（Chain ID: ${TARGET_CHAIN_ID}）检查并领取「猪猪币 ZHUZHU」的持币 BNB 分红：
+1. 分红追踪合约（ZhuZhuDividendTracker）：${DIVIDEND_TRACKER_ADDRESS}
+2. 只读核验（确认后再发送交易）：
+   - 调用 isEligible(我的地址) 确认持仓 >= 1,000,000 ZHUZHU（返回 true）
+   - 调用 withdrawable(我的地址) 确认可领取 BNB 数量 > 0
+3. 发起领取交易：
+   - 目标合约：${DIVIDEND_TRACKER_ADDRESS}
+   - 调用方法：claim()（value = 0 wei）
+   - Raw Calldata (Hex)：${claimCalldata}`;
 }
 
 const TOKENOMICS_CARDS = [
@@ -100,12 +151,15 @@ export default function HomePage() {
   const { connectors, connectAsync, isPending: isConnectingQuick } = useConnect();
   const { disconnectAsync } = useDisconnect();
   const { switchChain, switchChainAsync, isPending: isSwitching } = useSwitchChain();
+  const { openConnectModal } = useConnectModal();
 
   const [lots, setLots] = useState<number>(1);
   const [promptLots, setPromptLots] = useState<number>(10);
   const [quickAiName, setQuickAiName] = useState<string>('zhuzhu-agent');
   const [copiedKey, setCopiedKey] = useState<string>('');
   const [customQueryAddr, setCustomQueryAddr] = useState<string>('');
+  const [botLookupAddr, setBotLookupAddr] = useState<string>('');
+  const [watchAssetMsg, setWatchAssetMsg] = useState<string>('');
 
   const isWrongChain = isConnected && chainId !== TARGET_CHAIN_ID;
   const isWatchMode = connector?.id === WATCH_CONNECTOR_ID;
@@ -120,12 +174,13 @@ export default function HomePage() {
     }
   };
 
-  // ---- On-chain Global Reads ----
+  // ---- On-chain Global Reads (auto-refresh every 8s) ----
   const { data: lotsMintedData, refetch: refetchLotsMinted } = useReadContract({
     address: ZHUZHU_TOKEN_ADDRESS,
     abi: ZHUZHU_ABI,
     functionName: 'lotsMinted',
     chainId: TARGET_CHAIN_ID,
+    query: { refetchInterval: 8000 },
   });
 
   const { data: mintOpenData, refetch: refetchMintOpen } = useReadContract({
@@ -133,6 +188,7 @@ export default function HomePage() {
     abi: ZHUZHU_ABI,
     functionName: 'mintOpen',
     chainId: TARGET_CHAIN_ID,
+    query: { refetchInterval: 8000 },
   });
 
   const { data: tradingLiveData, refetch: refetchTradingLive } = useReadContract({
@@ -140,6 +196,7 @@ export default function HomePage() {
     abi: ZHUZHU_ABI,
     functionName: 'tradingLive',
     chainId: TARGET_CHAIN_ID,
+    query: { refetchInterval: 8000 },
   });
 
   const { data: pairAddress } = useReadContract({
@@ -154,6 +211,7 @@ export default function HomePage() {
     abi: DIVIDEND_TRACKER_ABI,
     functionName: 'totalDistributed',
     chainId: TARGET_CHAIN_ID,
+    query: { refetchInterval: 8000 },
   });
 
   const { data: eligibleSupplyData } = useReadContract({
@@ -161,6 +219,49 @@ export default function HomePage() {
     abi: DIVIDEND_TRACKER_ABI,
     functionName: 'eligibleSupply',
     chainId: TARGET_CHAIN_ID,
+    query: { refetchInterval: 8000 },
+  });
+
+  // ---- Arbitrary AI Bot Address Lookup Reads ----
+  const validBotLookupAddr: Address | undefined = useMemo(() => {
+    const trimmed = botLookupAddr.trim();
+    return trimmed && isAddress(trimmed) ? (trimmed as Address) : undefined;
+  }, [botLookupAddr]);
+
+  const { data: botHasAgentData } = useReadContract({
+    address: ZHUZHU_TOKEN_ADDRESS,
+    abi: ZHUZHU_ABI,
+    functionName: 'hasAgentId',
+    args: validBotLookupAddr ? [validBotLookupAddr] : undefined,
+    chainId: TARGET_CHAIN_ID,
+    query: { enabled: Boolean(validBotLookupAddr), refetchInterval: 8000 },
+  });
+
+  const { data: botHandleData } = useReadContract({
+    address: AGENT_ID_REGISTRY_ADDRESS,
+    abi: AGENT_ID_REGISTRY_ABI,
+    functionName: 'handleOf',
+    args: validBotLookupAddr ? [validBotLookupAddr] : undefined,
+    chainId: TARGET_CHAIN_ID,
+    query: { enabled: Boolean(validBotLookupAddr), refetchInterval: 8000 },
+  });
+
+  const { data: botMintedLotsData } = useReadContract({
+    address: ZHUZHU_TOKEN_ADDRESS,
+    abi: ZHUZHU_ABI,
+    functionName: 'mintedLots',
+    args: validBotLookupAddr ? [validBotLookupAddr] : undefined,
+    chainId: TARGET_CHAIN_ID,
+    query: { enabled: Boolean(validBotLookupAddr), refetchInterval: 8000 },
+  });
+
+  const { data: botTokenBalanceData } = useReadContract({
+    address: ZHUZHU_TOKEN_ADDRESS,
+    abi: ZHUZHU_ABI,
+    functionName: 'balanceOf',
+    args: validBotLookupAddr ? [validBotLookupAddr] : undefined,
+    chainId: TARGET_CHAIN_ID,
+    query: { enabled: Boolean(validBotLookupAddr), refetchInterval: 8000 },
   });
 
   // ---- Connected User Reads ----
@@ -425,18 +526,66 @@ export default function HomePage() {
     });
   };
 
-  const aiPromptText = `请帮我在 ${NETWORK_LABEL} 上认购「猪猪币 ZHUZHU」（官网 https://www.zhuzhubi.xyz）：
-1. 网络 Chain ID：${TARGET_CHAIN_ID}（请确认当前钱包有足够的 BNB 支付本金与 Gas）。
-2. ZHUZHU Token 合约：${ZHUZHU_TOKEN_ADDRESS}
-   Agent ID 注册表：${AGENT_ID_REGISTRY_ADDRESS}
-3. 安全核验（只读调用）：
-   - 调用 hasAgentId(我的地址) 确认返回 true（未返回 true 请勿继续）
-   - 调用 mintOpen() 确认返回 true，且 mintedLots(我的地址) + ${promptLots} <= 10
-4. 执行认购交易：
-   - 调用合约方法：mint(${promptLots})
-   - 携带精准 BNB 金额：${formatBnb(promptLots * LOT_PRICE_BNB)} BNB（每份 0.002 BNB，单地址上限 10 份 = 0.02 BNB）
-   - 预计收到：${(promptLots * TOKENS_PER_LOT).toLocaleString('en-US')} ZHUZHU
-5. 注意事项：切勿向其他陌生地址转账，仅向上述合约调用 mint(uint256)。`;
+  const handleWatchBotAddress = () => {
+    if (!validBotLookupAddr) return;
+    setWatchAddress(validBotLookupAddr);
+    connectQuickWallet({
+      connectors,
+      connectAsync,
+      disconnectAsync,
+      connectorId: WATCH_CONNECTOR_ID,
+      watchAddress: validBotLookupAddr,
+    });
+  };
+
+  const handleAddTokenToWallet = async () => {
+    setWatchAssetMsg('');
+    const eth = (
+      window as unknown as {
+        ethereum?: { request?: (args: { method: string; params?: unknown }) => Promise<unknown> };
+      }
+    ).ethereum;
+    if (!eth?.request) {
+      setWatchAssetMsg('未检测到钱包插件，请复制上方代币合约地址手动导入');
+      return;
+    }
+    try {
+      await eth.request({
+        method: 'wallet_watchAsset',
+        params: {
+          type: 'ERC20',
+          options: {
+            address: ZHUZHU_TOKEN_ADDRESS,
+            symbol: 'ZHUZHU',
+            decimals: 18,
+          },
+        },
+      });
+      setWatchAssetMsg('✓ 已向钱包弹出添加 $ZHUZHU 请求');
+    } catch {
+      setWatchAssetMsg('已取消或当前钱包不支持一键添加，可手动导入合约地址');
+    }
+  };
+
+  const promptCostBnb = formatBnb(promptLots * LOT_PRICE_BNB);
+  const promptValueWei = parseEther((promptLots * LOT_PRICE_BNB).toFixed(4)).toString();
+  const promptMintCalldata = useMemo(
+    () =>
+      encodeFunctionData({
+        abi: ZHUZHU_ABI,
+        functionName: 'mint',
+        args: [BigInt(promptLots)],
+      }),
+    [promptLots]
+  );
+
+  const aiPromptText = useMemo(() => buildAiMintPrompt(promptLots), [promptLots]);
+  const heroMaxBotPromptText = useMemo(() => buildAiMintPrompt(10), []);
+  const aiClaimPromptText = useMemo(() => buildAiClaimPrompt(), []);
+  const botFormattedHandle = formatAgentHandle(botHandleData);
+  const botHasAgentId = Boolean(botHasAgentData || botFormattedHandle);
+  const botMintedLotsNum = botMintedLotsData ? Number(botMintedLotsData) : 0;
+  const botTokenBalNum = botTokenBalanceData ? Number(formatEther(botTokenBalanceData)) : 0;
 
   return (
     <div className="mx-auto max-w-6xl space-y-24 px-4 py-10 md:py-14">
@@ -468,23 +617,51 @@ export default function HomePage() {
             </p>
 
             <div className="flex flex-wrap gap-3 pt-2">
+              <button
+                onClick={() => copyText('hero-bot-prompt', heroMaxBotPromptText)}
+                className="rounded-2xl bg-pig-500 px-6 py-3 text-sm font-extrabold text-white shadow-lg shadow-pig-500/25 transition hover:bg-pig-600"
+              >
+                {copiedKey === 'hero-bot-prompt'
+                  ? '✓ 已复制 AI 打满口令！快发给币安 AI 钱包'
+                  : '🤖 一键复制 AI 机器人打满口令 (10份 / 0.02 BNB)'}
+              </button>
               <a
                 href="#mint"
-                className="rounded-2xl bg-pig-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-pig-500/25 transition hover:bg-pig-600"
+                className="rounded-2xl border border-pig-400/35 bg-pig-500/10 px-5 py-3 text-sm font-bold text-pig-200 transition hover:bg-pig-500/20"
               >
-                🐷 立即认购 Mint（0.002 BNB/份）
+                🐷 手动钱包 Mint
               </a>
               <a
                 href="#agent-mint"
-                className="rounded-2xl border border-pig-400/35 bg-pig-500/10 px-6 py-3 text-sm font-bold text-pig-200 transition hover:bg-pig-500/20"
+                className="rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
               >
-                🤖 复制 AI Mint 口令
+                🧾 Calldata / 高级指令
               </a>
               <a
                 href="#rewards"
                 className="rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
               >
-                💰 查询 BNB 分红
+                💰 查分红
+              </a>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+              <span>🤖 AI Agent 协议文档：</span>
+              <a
+                href="/llms.txt"
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-emerald-300 hover:bg-white/10"
+              >
+                /llms.txt ↗
+              </a>
+              <a
+                href="/agent.json"
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-sky-300 hover:bg-white/10"
+              >
+                /agent.json ↗
               </a>
             </div>
           </div>
@@ -626,6 +803,44 @@ export default function HomePage() {
                     </a>
                   </div>
                 )}
+
+              <div className="border-t border-white/10 pt-3 space-y-2.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={handleAddTokenToWallet}
+                    className="rounded-xl border border-pig-500/35 bg-pig-500/15 px-3 py-1.5 text-xs font-bold text-pig-200 hover:bg-pig-500/25"
+                  >
+                    ➕ 添加 $ZHUZHU 到钱包
+                  </button>
+                  <a
+                    href={`https://pancakeswap.finance/swap?chain=${TARGET_CHAIN_ID === 97 ? 'bscTestnet' : 'bsc'}&outputCurrency=${ZHUZHU_TOKEN_ADDRESS}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10"
+                  >
+                    🥞 PancakeSwap ↗
+                  </a>
+                  <a
+                    href={`https://ave.ai/token/${ZHUZHU_TOKEN_ADDRESS}-bsc`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10"
+                  >
+                    📈 Ave.ai 看线 ↗
+                  </a>
+                  <a
+                    href={`https://dexscreener.com/bsc/${ZHUZHU_TOKEN_ADDRESS}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/10"
+                  >
+                    📊 DexScreener ↗
+                  </a>
+                </div>
+                {watchAssetMsg && (
+                  <p className="text-[11px] text-emerald-300">{watchAssetMsg}</p>
+                )}
+              </div>
             </div>
           </div>
 
@@ -635,9 +850,19 @@ export default function HomePage() {
             {!isConnected ? (
               <div className="rounded-2xl border border-pig-500/30 bg-pig-500/10 p-4 space-y-3">
                 <p className="text-sm font-bold text-pig-200">
-                  先连接你的币安 AI 钱包（或点击测试钱包快速体验）
+                  主要用 AI 机器人打新？可直接{' '}
+                  <a href="#agent-mint" className="underline text-pig-300">
+                    复制 AI 指令发给币安 AI 钱包
+                  </a>
+                  ，或手动连接钱包：
                 </p>
                 <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => openConnectModal?.()}
+                    className="rounded-xl bg-pig-500 px-3.5 py-2 text-xs font-bold text-white hover:bg-pig-600"
+                  >
+                    🔌 连接插件 / 币安钱包
+                  </button>
                   <button
                     onClick={() =>
                       connectQuickWallet({
@@ -651,7 +876,7 @@ export default function HomePage() {
                     disabled={isConnectingQuick}
                     className="rounded-xl border border-sky-500/40 bg-sky-500/20 px-3.5 py-2 text-xs font-bold text-sky-200 hover:bg-sky-500/30 disabled:opacity-50"
                   >
-                    🔗 直连 0x7b30...a1b8 核验身份
+                    👀 查示例 AI 钱包 (0x7b30...a1b8)
                   </button>
                   {HAS_BUILTIN_SIGNER && (
                     <button
@@ -664,9 +889,9 @@ export default function HomePage() {
                         })
                       }
                       disabled={isConnectingQuick}
-                      className="rounded-xl bg-pig-500 px-3.5 py-2 text-xs font-bold text-white hover:bg-pig-600 disabled:opacity-50"
+                      className="rounded-xl border border-emerald-500/40 bg-emerald-500/20 px-3.5 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/30 disabled:opacity-50"
                     >
-                      ⚡ 一键切入内置可签名测试钱包
+                      ⚡ 切入本地签名测试钱包
                     </button>
                   )}
                 </div>
@@ -728,6 +953,63 @@ export default function HomePage() {
                 )}
               </div>
             )}
+
+            {/* Quick AI Bot Address Inspector */}
+            <div className="rounded-2xl border border-white/10 bg-black/35 p-3.5 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-bold text-slate-200">
+                  🤖 查 AI 机器人钱包状态（免连钱包）
+                </span>
+                <button
+                  onClick={() => setBotLookupAddr(DEFAULT_WATCH_ADDRESS)}
+                  className="text-[11px] text-sky-300 hover:underline"
+                >
+                  填入示例 AI 地址
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={botLookupAddr}
+                  onChange={(e) => setBotLookupAddr(e.target.value)}
+                  placeholder="粘贴 AI 钱包 0x 地址，查 .ai 认证 / 已打份数 / 余额..."
+                  className="flex-1 min-w-[200px] rounded-xl border border-white/15 bg-black/55 px-3 py-1.5 text-xs font-mono text-white outline-none focus:border-pig-500"
+                />
+                {validBotLookupAddr && (
+                  <button
+                    onClick={handleWatchBotAddress}
+                    className="rounded-xl border border-sky-500/35 bg-sky-500/15 px-3 py-1.5 text-xs font-semibold text-sky-200 hover:bg-sky-500/25"
+                  >
+                    设为顶部监控
+                  </button>
+                )}
+              </div>
+              {botLookupAddr.trim() && !validBotLookupAddr && (
+                <p className="text-[11px] text-red-400">请输入有效的 BSC 0x 钱包地址</p>
+              )}
+              {validBotLookupAddr && (
+                <div className="grid grid-cols-3 gap-2 rounded-xl border border-white/10 bg-black/50 p-2.5 text-[11px]">
+                  <div>
+                    <span className="text-slate-400 block">.ai 身份</span>
+                    <span className={botHasAgentId ? 'font-bold text-emerald-300' : 'text-amber-300'}>
+                      {botHasAgentId ? `✓ ${botFormattedHandle || '已认证'}` : '未注册（可自动注册）'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block">已打份数</span>
+                    <span className="font-bold text-white">
+                      {botMintedLotsNum} / {MAX_LOTS_PER_WALLET} 份
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block">$ZHUZHU 持仓</span>
+                    <span className="font-bold text-pig-300">
+                      {botTokenBalNum.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Step 2: Progress Bar & Personal Quota */}
             <div className="space-y-2.5">
@@ -830,40 +1112,49 @@ export default function HomePage() {
 
             {/* Step 4: Submit Mint */}
             <button
-              onClick={handleMint}
+              onClick={() => {
+                if (!isConnected || isWatchMode) {
+                  openConnectModal?.();
+                  return;
+                }
+                handleMint();
+              }}
               disabled={
-                !isConnected ||
-                !hasAgentId ||
-                !mintOpen ||
-                maxSelectableLots <= 0 ||
-                isMintPending ||
-                isMintConfirming
+                isConnected &&
+                !isWatchMode &&
+                (!hasAgentId ||
+                  !mintOpen ||
+                  maxSelectableLots <= 0 ||
+                  isMintPending ||
+                  isMintConfirming)
               }
               className="w-full rounded-2xl bg-pig-500 py-4 text-sm font-extrabold text-white shadow-lg shadow-pig-500/25 transition hover:bg-pig-600 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {!isConnected
-                ? '请先连接币安 AI 钱包'
-                : !mintOpen
-                  ? '认购已结束'
-                  : remainingUserLots <= 0
-                    ? '当前钱包已打满 10 份上限（0.02 BNB）'
-                    : !hasAgentId
-                      ? '请先完成上方 .ai Agent ID 核验'
-                      : isMintPending
-                        ? '请在钱包中确认签名...'
-                        : isMintConfirming
-                          ? '链上交易确认中...'
-                          : `立即认购 ${lots} 份（支付 ${costBnbStr} BNB）`}
+                ? '🔌 连接币安 AI 钱包 / 浏览器钱包'
+                : isWatchMode
+                  ? '👀 当前为只读监控 · 点击连接真实钱包或使用下方 AI 口令'
+                  : !mintOpen
+                    ? '认购已结束'
+                    : remainingUserLots <= 0
+                      ? '当前钱包已打满 10 份上限（0.02 BNB）'
+                      : !hasAgentId
+                        ? '请先完成上方 .ai Agent ID 核验'
+                        : isMintPending
+                          ? '请在钱包中确认签名...'
+                          : isMintConfirming
+                            ? '链上交易确认中...'
+                            : `立即认购 ${lots} 份（支付 ${costBnbStr} BNB）`}
             </button>
 
             {isWatchMode && remainingUserLots > 0 && (
               <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 text-xs text-sky-200 space-y-2">
                 <p>
-                  当前为只读免密直连（0x7b30...a1b8）查看模式，可直接向您的币安 AI 钱包发送下方{' '}
+                  当前为只读 AI 钱包监控模式（{address ? shortAddr(address) : '--'}），可直接复制上方 / 下方的{' '}
                   <a href="#agent-mint" className="underline font-bold">
                     AI Mint 口令
                   </a>{' '}
-                  执行认购，或在插件钱包浏览器点击「连接钱包」签名。
+                  发给你的币安 AI 钱包执行自动认购，或在插件钱包浏览器点击「连接钱包」签名。
                 </p>
                 {HAS_BUILTIN_SIGNER && BUILTIN_SIGNER_ADDRESS && (
                   <button
@@ -890,16 +1181,24 @@ export default function HomePage() {
             )}
 
             {isMintSuccess && mintTxHash && (
-              <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs text-emerald-300">
-                ✓ 认购成功！$ZHUZHU 已实时发放至您的钱包。
-                <a
-                  href={`${EXPLORER}/tx/${mintTxHash}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="ml-2 underline"
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs text-emerald-300">
+                <div>
+                  ✓ 认购成功！$ZHUZHU 已实时发放至您的钱包。
+                  <a
+                    href={`${EXPLORER}/tx/${mintTxHash}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="ml-2 underline"
+                  >
+                    查看链上交易 ↗
+                  </a>
+                </div>
+                <button
+                  onClick={handleAddTokenToWallet}
+                  className="rounded-lg bg-emerald-500/25 px-2.5 py-1 font-bold text-emerald-100 hover:bg-emerald-500/35"
                 >
-                  查看链上交易 ↗
-                </a>
+                  ➕ 添加 $ZHUZHU 到钱包
+                </button>
               </div>
             )}
           </div>
@@ -920,18 +1219,18 @@ export default function HomePage() {
           {[
             {
               step: 'STEP 01',
-              title: '准备币安 AI 钱包与 BNB',
-              desc: '确认你的币安 AI 钱包已绑定 .ai Agent ID，并持有至少 0.002 ~ 0.025 BNB（含少量 Gas）。',
+              title: '自动检查并注册 .ai ID',
+              desc: '即使币安 AI 钱包尚未注册 .ai Agent ID，AI 也会自动先免手续费调用 AgentIdRegistry 注册（只需极少 Gas）。',
             },
             {
               step: 'STEP 02',
               title: '选择份数并复制 AI 口令',
-              desc: '在下方选择想要让 AI 自动打新的份数（默认打满 10 份 = 0.02 BNB），点击一键复制完整指令。',
+              desc: '默认按单钱包上限 10 份（0.02 BNB）生成，包含精确 wei 金额、Raw Calldata 与 /agent.json 清单地址。',
             },
             {
               step: 'STEP 03',
-              title: '发送给 AI 助手自动上链',
-              desc: 'AI 钱包会自动先只读核验 hasAgentId 与剩余额度，再向官方合约发起 mint() 认购交易。',
+              title: '发给 AI 助手全自动上链',
+              desc: 'AI 机器人会先只读核验 mintOpen 与剩余额度，再自动完成 register + mint 认购或 claim 领取 BNB 分红。',
             },
           ].map((item) => (
             <div
@@ -965,17 +1264,97 @@ export default function HomePage() {
                 </button>
               ))}
             </div>
-            <button
-              onClick={() => copyText('ai-prompt', aiPromptText)}
-              className="rounded-xl bg-pig-500 px-5 py-2 text-xs font-bold text-white shadow hover:bg-pig-600"
-            >
-              {copiedKey === 'ai-prompt' ? '✓ 已复制 AI Mint 口令' : '📋 一键复制 AI Mint 口令'}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => copyText('ai-prompt', aiPromptText)}
+                className="rounded-xl bg-pig-500 px-4 py-2 text-xs font-bold text-white shadow hover:bg-pig-600"
+              >
+                {copiedKey === 'ai-prompt' ? '✓ 已复制 AI Mint 口令' : '📋 一键复制 AI Mint 口令'}
+              </button>
+              <button
+                onClick={() => copyText('ai-claim-prompt', aiClaimPromptText)}
+                className="rounded-xl border border-amber-500/40 bg-amber-500/15 px-3.5 py-2 text-xs font-bold text-amber-200 hover:bg-amber-500/25"
+              >
+                {copiedKey === 'ai-claim-prompt'
+                  ? '✓ 已复制 AI 领分红口令'
+                  : '🎁 复制 AI 领分红 (claim) 口令'}
+              </button>
+            </div>
           </div>
 
           <pre className="overflow-x-auto rounded-2xl border border-white/10 bg-black/60 p-4 text-xs leading-relaxed text-emerald-300 font-mono">
             {aiPromptText}
           </pre>
+
+          <div className="rounded-2xl border border-white/10 bg-black/45 p-4 space-y-2.5 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-bold text-slate-200">
+                ⚡ 机器人直连交易参数（Raw Calldata / Bot Payload）
+              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => copyText('raw-calldata', promptMintCalldata)}
+                  className="rounded-lg border border-pig-500/35 bg-pig-500/15 px-3 py-1 font-semibold text-pig-200 hover:bg-pig-500/25"
+                >
+                  {copiedKey === 'raw-calldata' ? '✓ 已复制 Calldata' : '🧾 复制 Raw Calldata (Hex)'}
+                </button>
+                <button
+                  onClick={() =>
+                    copyText(
+                      'tx-json',
+                      JSON.stringify(
+                        {
+                          chainId: TARGET_CHAIN_ID,
+                          to: ZHUZHU_TOKEN_ADDRESS,
+                          valueWei: promptValueWei,
+                          valueBnb: promptCostBnb,
+                          data: promptMintCalldata,
+                        },
+                        null,
+                        2
+                      )
+                    )
+                  }
+                  className="rounded-lg border border-white/15 bg-white/5 px-3 py-1 font-semibold text-slate-200 hover:bg-white/10"
+                >
+                  {copiedKey === 'tx-json' ? '✓ 已复制 JSON' : '📋 复制交易 JSON'}
+                </button>
+              </div>
+            </div>
+            <div className="grid gap-1.5 font-mono text-[11px] text-slate-300 sm:grid-cols-2">
+              <div className="truncate">
+                <span className="text-slate-500">to: </span>
+                {ZHUZHU_TOKEN_ADDRESS}
+              </div>
+              <div>
+                <span className="text-slate-500">value: </span>
+                {promptValueWei} wei ({promptCostBnb} BNB)
+              </div>
+              <div className="sm:col-span-2 truncate">
+                <span className="text-slate-500">data: </span>
+                <span className="text-emerald-300">{promptMintCalldata}</span>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 pt-1 text-[11px] text-slate-400">
+              <span>机器可读端点（OpenClaw / AgentKit / MCP 直接读取）：</span>
+              <a
+                href="/llms.txt"
+                target="_blank"
+                rel="noreferrer"
+                className="font-mono text-emerald-300 underline"
+              >
+                https://www.zhuzhubi.xyz/llms.txt ↗
+              </a>
+              <a
+                href="/agent.json"
+                target="_blank"
+                rel="noreferrer"
+                className="font-mono text-sky-300 underline"
+              >
+                https://www.zhuzhubi.xyz/agent.json ↗
+              </a>
+            </div>
+          </div>
         </div>
       </section>
 
