@@ -10,7 +10,19 @@ import {
 import { createConfig, http } from 'wagmi';
 import { bsc, bscTestnet, foundry } from 'wagmi/chains';
 
-const projectId = process.env.NEXT_PUBLIC_REOWN_PROJECT_ID || 'zhuzhu-agent-local-dev';
+const projectId =
+  process.env.NEXT_PUBLIC_REOWN_PROJECT_ID ||
+  process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ||
+  '3a8170812b534d0ff9d794f19a901d64';
+
+const defaultChainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID || 97);
+
+const chains =
+  defaultChainId === 97
+    ? ([bscTestnet, bsc, foundry] as const)
+    : defaultChainId === 31337
+      ? ([foundry, bscTestnet, bsc] as const)
+      : ([bsc, bscTestnet, foundry] as const);
 
 const connectors = connectorsForWallets(
   [
@@ -34,10 +46,12 @@ const connectors = connectorsForWallets(
 
 export const config = createConfig({
   connectors,
-  chains: [bsc, bscTestnet, foundry],
+  chains,
   transports: {
-    [bsc.id]: http(),
-    [bscTestnet.id]: http(),
+    [bsc.id]: http(process.env.NEXT_PUBLIC_BSC_RPC || 'https://bsc-dataseed.bnbchain.org'),
+    [bscTestnet.id]: http(
+      process.env.NEXT_PUBLIC_BSC_TESTNET_RPC || 'https://bsc-testnet-rpc.publicnode.com'
+    ),
     [foundry.id]: http('http://127.0.0.1:8545'),
   },
   ssr: true,
