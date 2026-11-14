@@ -1,12 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useConnectModal } from '@rainbow-me/rainbowkit';
 import { encodeFunctionData, formatEther, isAddress, parseEther, type Address } from 'viem';
 import {
   useAccount,
   useBalance,
-  useConnect,
   useDisconnect,
   useReadContract,
   useSwitchChain,
@@ -25,15 +23,7 @@ import {
   ZHUZHU_TOKEN_ADDRESS,
   formatContractError,
 } from '@/lib/contracts';
-import {
-  BUILTIN_SIGNER_ADDRESS,
-  DEFAULT_WATCH_ADDRESS,
-  HAS_BUILTIN_SIGNER,
-  SIGNER_CONNECTOR_ID,
-  WATCH_CONNECTOR_ID,
-  connectQuickWallet,
-  setWatchAddress,
-} from '@/lib/wagmi';
+import { WATCH_CONNECTOR_ID, openWalletModal } from '@/lib/wagmi';
 
 const EXPLORER =
   TARGET_CHAIN_ID === 97 ? 'https://testnet.bscscan.com' : 'https://bscscan.com';
@@ -148,10 +138,8 @@ function shortAddr(addr: string) {
 
 export default function HomePage() {
   const { address, isConnected, chainId, connector } = useAccount();
-  const { connectors, connectAsync, isPending: isConnectingQuick } = useConnect();
   const { disconnectAsync } = useDisconnect();
   const { switchChain, switchChainAsync, isPending: isSwitching } = useSwitchChain();
-  const { openConnectModal } = useConnectModal();
 
   const [lots, setLots] = useState<number>(1);
   const [promptLots, setPromptLots] = useState<number>(10);
@@ -162,7 +150,12 @@ export default function HomePage() {
   const [watchAssetMsg, setWatchAssetMsg] = useState<string>('');
 
   const isWrongChain = isConnected && chainId !== TARGET_CHAIN_ID;
-  const isWatchMode = connector?.id === WATCH_CONNECTOR_ID;
+
+  useEffect(() => {
+    if (isConnected && connector?.id === WATCH_CONNECTOR_ID) {
+      disconnectAsync().catch(() => {});
+    }
+  }, [isConnected, connector?.id, disconnectAsync]);
 
   const copyText = async (key: string, text: string) => {
     try {
@@ -526,18 +519,6 @@ export default function HomePage() {
     });
   };
 
-  const handleWatchBotAddress = () => {
-    if (!validBotLookupAddr) return;
-    setWatchAddress(validBotLookupAddr);
-    connectQuickWallet({
-      connectors,
-      connectAsync,
-      disconnectAsync,
-      connectorId: WATCH_CONNECTOR_ID,
-      watchAddress: validBotLookupAddr,
-    });
-  };
-
   const handleAddTokenToWallet = async () => {
     setWatchAssetMsg('');
     const eth = (
@@ -848,53 +829,22 @@ export default function HomePage() {
           <div className="rounded-3xl border border-pig-500/25 bg-[#12121b] p-6 space-y-5 shadow-xl shadow-black/40">
             {/* Step 1: Wallet & AI ID Verification Status */}
             {!isConnected ? (
-              <div className="rounded-2xl border border-pig-500/30 bg-pig-500/10 p-4 space-y-3">
-                <p className="text-sm font-bold text-pig-200">
-                  主要用 AI 机器人打新？可直接{' '}
-                  <a href="#agent-mint" className="underline text-pig-300">
-                    复制 AI 指令发给币安 AI 钱包
-                  </a>
-                  ，或手动连接钱包：
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => openConnectModal?.()}
-                    className="rounded-xl bg-pig-500 px-3.5 py-2 text-xs font-bold text-white hover:bg-pig-600"
-                  >
-                    🔌 连接插件 / 币安钱包
-                  </button>
-                  <button
-                    onClick={() =>
-                      connectQuickWallet({
-                        connectors,
-                        connectAsync,
-                        disconnectAsync,
-                        connectorId: WATCH_CONNECTOR_ID,
-                        watchAddress: DEFAULT_WATCH_ADDRESS,
-                      })
-                    }
-                    disabled={isConnectingQuick}
-                    className="rounded-xl border border-sky-500/40 bg-sky-500/20 px-3.5 py-2 text-xs font-bold text-sky-200 hover:bg-sky-500/30 disabled:opacity-50"
-                  >
-                    👀 查示例 AI 钱包 (0x7b30...a1b8)
-                  </button>
-                  {HAS_BUILTIN_SIGNER && (
-                    <button
-                      onClick={() =>
-                        connectQuickWallet({
-                          connectors,
-                          connectAsync,
-                          disconnectAsync,
-                          connectorId: SIGNER_CONNECTOR_ID,
-                        })
-                      }
-                      disabled={isConnectingQuick}
-                      className="rounded-xl border border-emerald-500/40 bg-emerald-500/20 px-3.5 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/30 disabled:opacity-50"
-                    >
-                      ⚡ 切入本地签名测试钱包
-                    </button>
-                  )}
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-pig-500/30 bg-pig-500/10 p-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-pig-200">
+                    连接钱包后自动核验 .ai Agent ID
+                  </p>
+                  <p className="text-xs text-slate-300">
+                    每地址最多 10 份 · 连接 BSC 地址后自动检查链上 .ai 身份，或直接复制下方 AI 口令自动认购
+                  </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => openWalletModal()}
+                  className="shrink-0 rounded-xl bg-pig-500 px-4 py-2 text-xs font-bold text-white shadow hover:bg-pig-600"
+                >
+                  连接钱包 ↗
+                </button>
               </div>
             ) : isWrongChain ? (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-500/40 bg-red-500/15 p-4 text-xs">
@@ -929,25 +879,27 @@ export default function HomePage() {
             ) : (
               <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 space-y-3">
                 <p className="text-xs font-bold text-amber-200">
-                  未检测到当前钱包的 .ai Agent ID（币安 AI 钱包凭证）
+                  无 Mint 资格：当前地址未领取 .ai Agent ID
                 </p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    type="text"
-                    value={quickAiName}
-                    onChange={(e) => setQuickAiName(e.target.value)}
-                    placeholder="输入名称如 zhuzhu-bot"
-                    className="flex-1 min-w-[160px] rounded-xl border border-white/15 bg-black/50 px-3 py-1.5 text-xs text-white outline-none focus:border-pig-500"
-                  />
-                  <span className="text-xs text-slate-400">.ai</span>
-                  <button
-                    onClick={handleRegisterTestnetAi}
-                    disabled={cleanQuickHandle.length < 2 || isRegPending || isRegConfirming}
-                    className="rounded-xl bg-amber-500 px-3.5 py-1.5 text-xs font-bold text-black hover:bg-amber-400 disabled:opacity-40"
-                  >
-                    {isRegPending || isRegConfirming ? '绑定中...' : '测试网免费绑定 .ai'}
-                  </button>
-                </div>
+                {TARGET_CHAIN_ID === 97 && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="text"
+                      value={quickAiName}
+                      onChange={(e) => setQuickAiName(e.target.value)}
+                      placeholder="输入名称如 zhuzhu-bot"
+                      className="flex-1 min-w-[160px] rounded-xl border border-white/15 bg-black/50 px-3 py-1.5 text-xs text-white outline-none focus:border-pig-500"
+                    />
+                    <span className="text-xs text-slate-400">.ai</span>
+                    <button
+                      onClick={handleRegisterTestnetAi}
+                      disabled={cleanQuickHandle.length < 2 || isRegPending || isRegConfirming}
+                      className="rounded-xl bg-amber-500 px-3.5 py-1.5 text-xs font-bold text-black hover:bg-amber-400 disabled:opacity-40"
+                    >
+                      {isRegPending || isRegConfirming ? '绑定中...' : '测试网免费绑定 .ai'}
+                    </button>
+                  </div>
+                )}
                 {regError && (
                   <p className="text-xs text-red-400">{formatContractError(regError)}</p>
                 )}
@@ -960,12 +912,6 @@ export default function HomePage() {
                 <span className="text-xs font-bold text-slate-200">
                   🤖 查 AI 机器人钱包状态（免连钱包）
                 </span>
-                <button
-                  onClick={() => setBotLookupAddr(DEFAULT_WATCH_ADDRESS)}
-                  className="text-[11px] text-sky-300 hover:underline"
-                >
-                  填入示例 AI 地址
-                </button>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <input
@@ -975,14 +921,6 @@ export default function HomePage() {
                   placeholder="粘贴 AI 钱包 0x 地址，查 .ai 认证 / 已打份数 / 余额..."
                   className="flex-1 min-w-[200px] rounded-xl border border-white/15 bg-black/55 px-3 py-1.5 text-xs font-mono text-white outline-none focus:border-pig-500"
                 />
-                {validBotLookupAddr && (
-                  <button
-                    onClick={handleWatchBotAddress}
-                    className="rounded-xl border border-sky-500/35 bg-sky-500/15 px-3 py-1.5 text-xs font-semibold text-sky-200 hover:bg-sky-500/25"
-                  >
-                    设为顶部监控
-                  </button>
-                )}
               </div>
               {botLookupAddr.trim() && !validBotLookupAddr && (
                 <p className="text-[11px] text-red-400">请输入有效的 BSC 0x 钱包地址</p>
@@ -1113,15 +1051,14 @@ export default function HomePage() {
             {/* Step 4: Submit Mint */}
             <button
               onClick={() => {
-                if (!isConnected || isWatchMode) {
-                  openConnectModal?.();
+                if (!isConnected) {
+                  openWalletModal();
                   return;
                 }
                 handleMint();
               }}
               disabled={
                 isConnected &&
-                !isWatchMode &&
                 (!hasAgentId ||
                   !mintOpen ||
                   maxSelectableLots <= 0 ||
@@ -1131,48 +1068,19 @@ export default function HomePage() {
               className="w-full rounded-2xl bg-pig-500 py-4 text-sm font-extrabold text-white shadow-lg shadow-pig-500/25 transition hover:bg-pig-600 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {!isConnected
-                ? '🔌 连接币安 AI 钱包 / 浏览器钱包'
-                : isWatchMode
-                  ? '👀 当前为只读监控 · 点击连接真实钱包或使用下方 AI 口令'
-                  : !mintOpen
-                    ? '认购已结束'
-                    : remainingUserLots <= 0
-                      ? '当前钱包已打满 10 份上限（0.02 BNB）'
-                      : !hasAgentId
-                        ? '请先完成上方 .ai Agent ID 核验'
-                        : isMintPending
-                          ? '请在钱包中确认签名...'
-                          : isMintConfirming
-                            ? '链上交易确认中...'
-                            : `立即认购 ${lots} 份（支付 ${costBnbStr} BNB）`}
+                ? '连接钱包参与 Mint'
+                : !mintOpen
+                  ? '认购已结束'
+                  : remainingUserLots <= 0
+                    ? '当前钱包已打满 10 份上限（0.02 BNB）'
+                    : !hasAgentId
+                      ? '请先完成上方 .ai Agent ID 核验'
+                      : isMintPending
+                        ? '请在钱包中确认签名...'
+                        : isMintConfirming
+                          ? '链上交易确认中...'
+                          : `立即认购 ${lots} 份（支付 ${costBnbStr} BNB）`}
             </button>
-
-            {isWatchMode && remainingUserLots > 0 && (
-              <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 text-xs text-sky-200 space-y-2">
-                <p>
-                  当前为只读 AI 钱包监控模式（{address ? shortAddr(address) : '--'}），可直接复制上方 / 下方的{' '}
-                  <a href="#agent-mint" className="underline font-bold">
-                    AI Mint 口令
-                  </a>{' '}
-                  发给你的币安 AI 钱包执行自动认购，或在插件钱包浏览器点击「连接钱包」签名。
-                </p>
-                {HAS_BUILTIN_SIGNER && BUILTIN_SIGNER_ADDRESS && (
-                  <button
-                    onClick={() =>
-                      connectQuickWallet({
-                        connectors,
-                        connectAsync,
-                        disconnectAsync,
-                        connectorId: SIGNER_CONNECTOR_ID,
-                      })
-                    }
-                    className="rounded-lg bg-sky-500/25 px-3 py-1 font-bold text-sky-100 hover:bg-sky-500/35"
-                  >
-                    ⚡ 切换至内置测试钱包 ({shortAddr(BUILTIN_SIGNER_ADDRESS)}) 实操上链 Mint
-                  </button>
-                )}
-              </div>
-            )}
 
             {mintError && (
               <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-300">
@@ -1433,14 +1341,6 @@ export default function HomePage() {
               }
               className="flex-1 min-w-[240px] rounded-xl border border-white/15 bg-black/50 px-4 py-2.5 text-xs font-mono text-white outline-none focus:border-pig-500"
             />
-            {BUILTIN_SIGNER_ADDRESS && (
-              <button
-                onClick={() => setCustomQueryAddr(BUILTIN_SIGNER_ADDRESS ?? '')}
-                className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 hover:bg-white/10"
-              >
-                查测试首单地址 ({shortAddr(BUILTIN_SIGNER_ADDRESS)})
-              </button>
-            )}
             {customQueryAddr && (
               <button
                 onClick={() => setCustomQueryAddr('')}

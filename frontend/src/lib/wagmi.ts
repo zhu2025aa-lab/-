@@ -55,10 +55,174 @@ const activeTransport =
 
 export const WATCH_CONNECTOR_ID = 'zhuzhu-watch-address';
 export const SIGNER_CONNECTOR_ID = 'zhuzhu-testnet-signer';
+export const BROWSER_PLUGIN_CONNECTOR_ID = 'zhuzhu-browser-plugin';
 export const DEFAULT_WATCH_ADDRESS: Address = '0x7b3024717969ca7c3dcd5aa681faff7b335da1b8';
 
 const WATCH_STORAGE_KEY = 'zhuzhu_watch_address';
 const ACTIVE_CUSTOM_STORAGE_KEY = 'zhuzhu_active_custom_connector';
+
+export interface DetectedBrowserWallet {
+  name: string;
+  icon?: string;
+  rdns?: string;
+  provider: EIP1193Provider;
+}
+
+type WalletProviderFlags = {
+  isOkxWallet?: boolean;
+  isMetaMask?: boolean;
+  isBinance?: boolean;
+  isTrust?: boolean;
+};
+
+type WindowWithWallets = Window & {
+  ethereum?: EIP1193Provider &
+    WalletProviderFlags & {
+      providers?: Array<EIP1193Provider & WalletProviderFlags>;
+    };
+  okxwallet?: EIP1193Provider & WalletProviderFlags;
+  BinanceChain?: EIP1193Provider & WalletProviderFlags;
+};
+
+type WalletModalListener = () => void;
+const modalListeners = new Set<WalletModalListener>();
+
+export function openWalletModal() {
+  modalListeners.forEach((fn) => fn());
+}
+
+export function subscribeWalletModal(fn: WalletModalListener): () => void {
+  modalListeners.add(fn);
+  return () => {
+    modalListeners.delete(fn);
+  };
+}
+
+export function inferProviderName(p: WalletProviderFlags): string {
+  if (p.isBinance) return 'Binance Wallet';
+  if (p.isOkxWallet) return 'OKX Wallet';
+  if (p.isMetaMask) return 'MetaMask';
+  if (p.isTrust) return 'Trust Wallet';
+  return '浏览器钱包';
+}
+
+export function detectBrowserWallets(): DetectedBrowserWallet[] {
+  if (typeof window === 'undefined') return [];
+  const win = window as WindowWithWallets;
+  const found: DetectedBrowserWallet[] = [];
+  const add = (
+    provider: (EIP1193Provider & WalletProviderFlags) | undefined,
+    name: string,
+    icon?: string,
+    rdns?: string
+  ) => {
+    if (!provider || typeof provider.request !== 'function') return;
+    if (found.some((item) => item.provider === provider)) return;
+    found.push({ provider, name, icon, rdns });
+  };
+
+  const onAnnounce = (ev: Event) => {
+    const detail = (
+      ev as CustomEvent<{
+        info?: { name?: string; icon?: string; rdns?: string };
+        provider?: EIP1193Provider & WalletProviderFlags;
+      }>
+    ).detail;
+    if (detail?.provider) {
+      add(
+        detail.provider,
+        detail.info?.name || inferProviderName(detail.provider),
+        detail.info?.icon,
+        detail.info?.rdns
+      );
+    }
+  };
+
+  window.addEventListener('eip6963:announceProvider', onAnnounce);
+  try {
+    window.dispatchEvent(new Event('eip6963:requestProvider'));
+  } finally {
+    window.removeEventListener('eip6963:announceProvider', onAnnounce);
+  }
+
+  const injectedList = win.ethereum?.providers?.length
+    ? win.ethereum.providers
+    : win.ethereum
+      ? [win.ethereum]
+      : [];
+  for (const p of injectedList) {
+    add(p, inferProviderName(p));
+  }
+  add(win.BinanceChain, 'Binance Wallet');
+  add(win.okxwallet, 'OKX Wallet');
+  return found;
+}
+
+export async function ensureTargetBscChain(provider: EIP1193Provider, targetChainId: number) {
+  const currentHex = (await provider.request({ method: 'eth_chainId' })) as string;
+  if (Number(currentHex) === targetChainId) return;
+  const hexChainId = numberToHex(targetChainId);
+  try {
+    await provider.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: hexChainId }],
+    });
+  } catch (err) {
+    const code = (err as { code?: number })?.code;
+    if (code === 4902 && (targetChainId === 97 || targetChainId === 56)) {
+      await provider.request({
+        method: 'wallet_addEthereumChain',
+        params: [
+          targetChainId === 97
+            ? {
+                chainId: '0x61',
+                chainName: 'BNB Smart Chain Testnet',
+                nativeCurrency: { name: 'tBNB', symbol: 'tBNB', decimals: 18 },
+                rpcUrls: ['https://data-seed-prebsc-1-s1.bnbchain.org:8545'],
+                blockExplorerUrls: ['https://testnet.bscscan.com'],
+              }
+            : {
+                chainId: '0x38',
+                chainName: 'BNB Smart Chain',
+                nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+                rpcUrls: ['https://bsc-dataseed.bnbchain.org'],
+                blockExplorerUrls: ['https://bscscan.com'],
+              },
+        ],
+      });
+    } else {
+      throw err;
+    }
+  }
+  const afterHex = (await provider.request({ method: 'eth_chainId' })) as string;
+  if (Number(afterHex) !== targetChainId) {
+    throw new Error(
+      targetChainId === 97 ? '请切换到 BSC Testnet 测试网' : '请切换到 BNB Smart Chain 主网'
+    );
+  }
+}
+
+export function formatWalletError(err: unknown): string {
+  if (!err) return '钱包连接失败';
+  const e = err as {
+    code?: number | string;
+    reason?: string;
+    shortMessage?: string;
+    message?: string;
+  };
+  if (e.code === 4001 || e.code === 'ACTION_REJECTED') {
+    return '你已取消钱包操作，未完成交易。';
+  }
+  return e.reason || e.shortMessage || e.message || String(err);
+}
+
+let selectedPluginProvider: EIP1193Provider | null = null;
+let selectedPluginAddress: Address | null = null;
+
+export function setSelectedBrowserPlugin(provider: EIP1193Provider, addr: Address) {
+  selectedPluginProvider = provider;
+  selectedPluginAddress = getAddress(addr);
+}
 
 const DEMO_SIGNER_KEY = process.env.NEXT_PUBLIC_DEMO_SIGNER_KEY;
 export const HAS_BUILTIN_SIGNER = Boolean(
@@ -193,6 +357,13 @@ function makeCustomConnector({
     },
     async isAuthorized() {
       if (typeof window === 'undefined' || !getAddressForConnect()) return false;
+      if (id === WATCH_CONNECTOR_ID) {
+        if (window.localStorage.getItem(ACTIVE_CUSTOM_STORAGE_KEY) === id) {
+          window.localStorage.removeItem(ACTIVE_CUSTOM_STORAGE_KEY);
+        }
+        window.localStorage.removeItem(WATCH_STORAGE_KEY);
+        return false;
+      }
       return window.localStorage.getItem(ACTIVE_CUSTOM_STORAGE_KEY) === id;
     },
     async switchChain({ chainId }) {
@@ -301,6 +472,152 @@ function builtinSignerConnector() {
   });
 }
 
+function browserPluginConnector() {
+  type EventedProvider = EIP1193Provider & {
+    on?: (event: string, listener: (...args: unknown[]) => void) => void;
+    removeListener?: (event: string, listener: (...args: unknown[]) => void) => void;
+  };
+  let boundProvider: EventedProvider | null = null;
+  let boundHandlers: {
+    onAcc: (...args: unknown[]) => void;
+    onChain: (...args: unknown[]) => void;
+    onDisc: () => void;
+  } | null = null;
+
+  const detach = () => {
+    if (boundProvider && boundHandlers) {
+      boundProvider.removeListener?.('accountsChanged', boundHandlers.onAcc);
+      boundProvider.removeListener?.('chainChanged', boundHandlers.onChain);
+      boundProvider.removeListener?.('disconnect', boundHandlers.onDisc);
+    }
+    boundProvider = null;
+    boundHandlers = null;
+  };
+
+  const delegatingProvider = {
+    on(event: string, listener: (...args: unknown[]) => void) {
+      (selectedPluginProvider as EventedProvider | null)?.on?.(event, listener);
+    },
+    removeListener(event: string, listener: (...args: unknown[]) => void) {
+      (selectedPluginProvider as EventedProvider | null)?.removeListener?.(event, listener);
+    },
+    async request(args: { method: string; params?: unknown }) {
+      if (!selectedPluginProvider) {
+        throw new Error('请先点击「连接钱包」选择浏览器钱包插件');
+      }
+      return selectedPluginProvider.request(args as never);
+    },
+  } as unknown as EIP1193Provider;
+
+  return createConnector<EIP1193Provider>((config) => ({
+    id: BROWSER_PLUGIN_CONNECTOR_ID,
+    name: '浏览器钱包插件 (EIP-6963)',
+    type: 'browser-plugin',
+    async connect({ withCapabilities } = {}) {
+      if (!selectedPluginProvider || !selectedPluginAddress) {
+        throw new Error('请先在弹窗中选择钱包插件');
+      }
+      detach();
+      const target = selectedPluginProvider as EventedProvider;
+      const onAcc = (...args: unknown[]) => {
+        const list = (args[0] as string[]) || [];
+        if (selectedPluginProvider !== target) return;
+        if (!list.length) {
+          selectedPluginProvider = null;
+          selectedPluginAddress = null;
+          detach();
+          config.emitter.emit('disconnect');
+        } else {
+          selectedPluginAddress = getAddress(list[0]);
+          config.emitter.emit('change', { accounts: [selectedPluginAddress] });
+        }
+      };
+      const onChain = (...args: unknown[]) => {
+        const hex = args[0] as string;
+        if (selectedPluginProvider !== target) return;
+        config.emitter.emit('change', { chainId: Number(hex) });
+      };
+      const onDisc = () => {
+        if (selectedPluginProvider !== target) return;
+        selectedPluginProvider = null;
+        selectedPluginAddress = null;
+        detach();
+        config.emitter.emit('disconnect');
+      };
+      target.on?.('accountsChanged', onAcc);
+      target.on?.('chainChanged', onChain);
+      target.on?.('disconnect', onDisc);
+      boundProvider = target;
+      boundHandlers = { onAcc, onChain, onDisc };
+
+      const hexChain = (await selectedPluginProvider.request({ method: 'eth_chainId' })) as string;
+      const chainIdNum = Number(hexChain) || activeChain.id;
+      const accounts = [selectedPluginAddress] as const;
+      return {
+        accounts: (withCapabilities
+          ? accounts.map((address) => ({ address, capabilities: {} }))
+          : accounts) as never,
+        chainId: chainIdNum,
+      };
+    },
+    async disconnect() {
+      detach();
+      selectedPluginProvider = null;
+      selectedPluginAddress = null;
+    },
+    async getAccounts() {
+      return selectedPluginAddress ? [selectedPluginAddress] : [];
+    },
+    async getChainId() {
+      if (selectedPluginProvider) {
+        try {
+          const hexChain = (await selectedPluginProvider.request({
+            method: 'eth_chainId',
+          })) as string;
+          return Number(hexChain) || activeChain.id;
+        } catch {
+          return activeChain.id;
+        }
+      }
+      return activeChain.id;
+    },
+    async getProvider() {
+      return delegatingProvider;
+    },
+    async isAuthorized() {
+      return Boolean(selectedPluginProvider && selectedPluginAddress);
+    },
+    async switchChain({ chainId }) {
+      if (selectedPluginProvider) {
+        await ensureTargetBscChain(selectedPluginProvider, chainId);
+      }
+      const target = config.chains.find((c) => c.id === chainId) ?? activeChain;
+      config.emitter.emit('change', { chainId: target.id });
+      return target;
+    },
+    onAccountsChanged(accounts) {
+      if (!accounts.length) {
+        detach();
+        selectedPluginProvider = null;
+        selectedPluginAddress = null;
+        config.emitter.emit('disconnect');
+      } else {
+        selectedPluginAddress = getAddress(accounts[0]);
+        config.emitter.emit('change', { accounts: [selectedPluginAddress] });
+      }
+    },
+    onChainChanged(chainIdHex) {
+      config.emitter.emit('change', { chainId: Number(chainIdHex) });
+    },
+    onDisconnect() {
+      detach();
+      selectedPluginProvider = null;
+      selectedPluginAddress = null;
+      config.emitter.emit('disconnect');
+    },
+  }));
+}
+
 const rainbowConnectors = connectorsForWallets(
   [
     {
@@ -323,6 +640,7 @@ const rainbowConnectors = connectorsForWallets(
 
 export const config = createConfig({
   connectors: [
+    browserPluginConnector(),
     ...rainbowConnectors,
     watchAddressConnector(),
     ...(HAS_BUILTIN_SIGNER ? [builtinSignerConnector()] : []),
