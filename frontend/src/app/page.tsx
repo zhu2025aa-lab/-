@@ -7,6 +7,7 @@ import {
   LEVELS,
   PIG_BADGE_ABI,
   PIG_BADGE_ADDRESS,
+  TARGET_CHAIN_ID,
   ZHUZHU_ABI,
   ZHUZHU_TOKEN_ADDRESS,
 } from '@/lib/contracts';
@@ -24,21 +25,25 @@ export default function HomePage() {
     address: ZHUZHU_TOKEN_ADDRESS,
     abi: ZHUZHU_ABI,
     functionName: 'packsSold',
+    chainId: TARGET_CHAIN_ID,
   });
   const { data: totalBurned } = useReadContract({
     address: ZHUZHU_TOKEN_ADDRESS,
     abi: ZHUZHU_ABI,
     functionName: 'totalBurned',
+    chainId: TARGET_CHAIN_ID,
   });
   const { data: nextId } = useReadContract({
     address: PIG_BADGE_ADDRESS,
     abi: PIG_BADGE_ABI,
     functionName: 'nextId',
+    chainId: TARGET_CHAIN_ID,
   });
   const { data: totalPigs } = useReadContract({
     address: PIG_BADGE_ADDRESS,
     abi: PIG_BADGE_ABI,
     functionName: 'totalPigs',
+    chainId: TARGET_CHAIN_ID,
   });
 
   const mintedBadges = nextId ? Number(nextId) - 1 : 0;

@@ -6,6 +6,7 @@ import {
   useAccount,
   usePublicClient,
   useReadContract,
+  useSwitchChain,
   useWaitForTransactionReceipt,
   useWriteContract,
 } from 'wagmi';
@@ -15,8 +16,10 @@ import {
   LEVELS,
   PIG_BADGE_ABI,
   PIG_BADGE_ADDRESS,
+  TARGET_CHAIN_ID,
   ZHUZHU_ABI,
   ZHUZHU_TOKEN_ADDRESS,
+  formatContractError,
 } from '@/lib/contracts';
 
 interface WorkLogItem {
@@ -31,17 +34,21 @@ const WORKED_EVENT = parseAbiItem(
 );
 
 export default function FarmPage() {
-  const { address } = useAccount();
-  const publicClient = usePublicClient();
+  const { address, isConnected, chainId } = useAccount();
+  const { switchChain, switchChainAsync, isPending: isSwitching } = useSwitchChain();
+  const publicClient = usePublicClient({ chainId: TARGET_CHAIN_ID });
   const [selectedId, setSelectedId] = useState<bigint | null>(null);
   const [agentInput, setAgentInput] = useState('');
   const [workLogs, setWorkLogs] = useState<WorkLogItem[]>([]);
+
+  const isWrongChain = isConnected && chainId !== TARGET_CHAIN_ID;
 
   const { data: myIds, refetch: refetchIds } = useReadContract({
     address: PIG_BADGE_ADDRESS,
     abi: PIG_BADGE_ABI,
     functionName: 'tokensOfOwner',
     args: address ? [address] : undefined,
+    chainId: TARGET_CHAIN_ID,
     query: { enabled: Boolean(address) },
   });
 
@@ -50,6 +57,7 @@ export default function FarmPage() {
     abi: ZHUZHU_ABI,
     functionName: 'balanceOf',
     args: address ? [address] : undefined,
+    chainId: TARGET_CHAIN_ID,
     query: { enabled: Boolean(address) },
   });
 
@@ -58,6 +66,7 @@ export default function FarmPage() {
     abi: ZHUZHU_ABI,
     functionName: 'allowance',
     args: address ? [address, PIG_BADGE_ADDRESS] : undefined,
+    chainId: TARGET_CHAIN_ID,
     query: { enabled: Boolean(address) },
   });
 
@@ -66,6 +75,7 @@ export default function FarmPage() {
     abi: AGENT_REGISTRY_ABI,
     functionName: 'isAgentWallet',
     args: isAddress(agentInput) ? [agentInput] : undefined,
+    chainId: TARGET_CHAIN_ID,
     query: { enabled: isAddress(agentInput) },
   });
 
@@ -84,6 +94,7 @@ export default function FarmPage() {
     abi: PIG_BADGE_ABI,
     functionName: 'badges',
     args: selectedId !== null ? [selectedId] : undefined,
+    chainId: TARGET_CHAIN_ID,
     query: { enabled: selectedId !== null },
   });
 
@@ -92,6 +103,7 @@ export default function FarmPage() {
     abi: PIG_BADGE_ABI,
     functionName: 'canWork',
     args: selectedId !== null ? [selectedId] : undefined,
+    chainId: TARGET_CHAIN_ID,
     query: { enabled: selectedId !== null },
   });
 
@@ -128,7 +140,10 @@ export default function FarmPage() {
   }, [fetchLogs]);
 
   const { writeContract, data: txHash, isPending, error } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
+    hash: txHash,
+    chainId: TARGET_CHAIN_ID,
+  });
 
   useEffect(() => {
     if (isSuccess) {
@@ -176,52 +191,68 @@ export default function FarmPage() {
     ? '可立即打卡'
     : `${Math.floor(remainSec / 3600)}h ${Math.floor((remainSec % 3600) / 60)}m`;
 
-  const handleAssign = () => {
-    if (selectedId === null || !isAddress(agentInput)) return;
+  const ensureTargetChain = async () => {
+    if (!isWrongChain) return true;
+    try {
+      await switchChainAsync({ chainId: TARGET_CHAIN_ID });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleAssign = async () => {
+    if (selectedId === null || !isAddress(agentInput) || !(await ensureTargetChain())) return;
     writeContract({
       address: PIG_BADGE_ADDRESS,
       abi: PIG_BADGE_ABI,
       functionName: 'assignAgent',
       args: [selectedId, agentInput],
+      chainId: TARGET_CHAIN_ID,
     });
   };
 
-  const handleRevoke = () => {
-    if (selectedId === null) return;
+  const handleRevoke = async () => {
+    if (selectedId === null || !(await ensureTargetChain())) return;
     writeContract({
       address: PIG_BADGE_ADDRESS,
       abi: PIG_BADGE_ABI,
       functionName: 'revokeAgent',
       args: [selectedId],
+      chainId: TARGET_CHAIN_ID,
     });
   };
 
-  const handleApproveUpgrade = () => {
+  const handleApproveUpgrade = async () => {
+    if (!(await ensureTargetChain())) return;
     writeContract({
       address: ZHUZHU_TOKEN_ADDRESS,
       abi: ZHUZHU_ABI,
       functionName: 'approve',
       args: [PIG_BADGE_ADDRESS, parseEther('1000000')],
+      chainId: TARGET_CHAIN_ID,
     });
   };
 
-  const handleLevelUp = () => {
-    if (selectedId === null) return;
+  const handleLevelUp = async () => {
+    if (selectedId === null || !(await ensureTargetChain())) return;
     writeContract({
       address: PIG_BADGE_ADDRESS,
       abi: PIG_BADGE_ABI,
       functionName: 'levelUp',
       args: [selectedId],
+      chainId: TARGET_CHAIN_ID,
     });
   };
 
-  const handleWork = () => {
-    if (selectedId === null) return;
+  const handleWork = async () => {
+    if (selectedId === null || !(await ensureTargetChain())) return;
     writeContract({
       address: PIG_BADGE_ADDRESS,
       abi: PIG_BADGE_ABI,
       functionName: 'work',
       args: [selectedId],
+      chainId: TARGET_CHAIN_ID,
     });
   };
 
@@ -254,6 +285,21 @@ export default function FarmPage() {
           </div>
         )}
       </div>
+
+      {isWrongChain && (
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-red-500/40 bg-red-500/15 p-5">
+          <p className="text-xs font-semibold text-red-200">
+            ⚠️ 请先将钱包切换至 BSC Testnet (Chain ID {TARGET_CHAIN_ID}) 后再管理工牌或打卡。
+          </p>
+          <button
+            onClick={() => switchChain({ chainId: TARGET_CHAIN_ID })}
+            disabled={isSwitching}
+            className="rounded-xl bg-red-500 px-4 py-2 text-xs font-bold text-white hover:bg-red-400 disabled:opacity-50"
+          >
+            {isSwitching ? '切换中...' : `🔄 切换至 BSC Testnet (${TARGET_CHAIN_ID})`}
+          </button>
+        </div>
+      )}
 
       {!address ? (
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-12 text-center text-slate-400">
@@ -471,7 +517,7 @@ export default function FarmPage() {
             </div>
 
             {error && (
-              <p className="text-xs text-red-400">交易失败：{error.message.slice(0, 100)}</p>
+              <p className="text-xs text-red-400">交易失败：{formatContractError(error)}</p>
             )}
           </div>
         </div>

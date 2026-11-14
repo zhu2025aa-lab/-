@@ -7,6 +7,7 @@ import {
   useAccount,
   useReadContract,
   useReadContracts,
+  useSwitchChain,
   useWaitForTransactionReceipt,
   useWriteContract,
 } from 'wagmi';
@@ -16,20 +17,25 @@ import {
   LEVELS,
   PIG_BADGE_ABI,
   PIG_BADGE_ADDRESS,
+  TARGET_CHAIN_ID,
   ZHUZHU_ABI,
   ZHUZHU_TOKEN_ADDRESS,
+  formatContractError,
 } from '@/lib/contracts';
 
 const MINT_COST = parseEther('500');
 
 export default function BadgePage() {
-  const { address } = useAccount();
+  const { address, isConnected, chainId } = useAccount();
+  const { switchChain, switchChainAsync, isPending: isSwitching } = useSwitchChain();
+  const isWrongChain = isConnected && chainId !== TARGET_CHAIN_ID;
 
   const { data: isAgentWallet } = useReadContract({
     address: AGENT_REGISTRY_ADDRESS,
     abi: AGENT_REGISTRY_ABI,
     functionName: 'isAgentWallet',
     args: address ? [address] : undefined,
+    chainId: TARGET_CHAIN_ID,
     query: { enabled: Boolean(address) },
   });
 
@@ -38,6 +44,7 @@ export default function BadgePage() {
     abi: ZHUZHU_ABI,
     functionName: 'balanceOf',
     args: address ? [address] : undefined,
+    chainId: TARGET_CHAIN_ID,
     query: { enabled: Boolean(address) },
   });
 
@@ -46,6 +53,7 @@ export default function BadgePage() {
     abi: ZHUZHU_ABI,
     functionName: 'allowance',
     args: address ? [address, PIG_BADGE_ADDRESS] : undefined,
+    chainId: TARGET_CHAIN_ID,
     query: { enabled: Boolean(address) },
   });
 
@@ -54,6 +62,7 @@ export default function BadgePage() {
     abi: PIG_BADGE_ABI,
     functionName: 'tokensOfOwner',
     args: address ? [address] : undefined,
+    chainId: TARGET_CHAIN_ID,
     query: { enabled: Boolean(address) },
   });
 
@@ -63,12 +72,16 @@ export default function BadgePage() {
       abi: PIG_BADGE_ABI,
       functionName: 'badges',
       args: [id],
+      chainId: TARGET_CHAIN_ID,
     })),
     query: { enabled: Boolean(myIds && myIds.length > 0) },
   });
 
   const { writeContract, data: txHash, isPending, error } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
+    hash: txHash,
+    chainId: TARGET_CHAIN_ID,
+  });
 
   useEffect(() => {
     if (isSuccess) {
@@ -83,20 +96,34 @@ export default function BadgePage() {
   const hasEnough = balance !== undefined && balance >= MINT_COST;
   const badgeCount = myIds ? myIds.length : 0;
 
-  const handleApprove = () => {
+  const ensureTargetChain = async () => {
+    if (!isWrongChain) return true;
+    try {
+      await switchChainAsync({ chainId: TARGET_CHAIN_ID });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleApprove = async () => {
+    if (!(await ensureTargetChain())) return;
     writeContract({
       address: ZHUZHU_TOKEN_ADDRESS,
       abi: ZHUZHU_ABI,
       functionName: 'approve',
       args: [PIG_BADGE_ADDRESS, parseEther('1000000')],
+      chainId: TARGET_CHAIN_ID,
     });
   };
 
-  const handleMintBadge = () => {
+  const handleMintBadge = async () => {
+    if (!(await ensureTargetChain())) return;
     writeContract({
       address: PIG_BADGE_ADDRESS,
       abi: PIG_BADGE_ABI,
       functionName: 'mint',
+      chainId: TARGET_CHAIN_ID,
     });
   };
 
@@ -112,6 +139,21 @@ export default function BadgePage() {
         </p>
       </div>
 
+      {isWrongChain && (
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-red-500/40 bg-red-500/15 p-5">
+          <p className="text-xs text-red-200 font-semibold">
+            ⚠️ 请先将钱包切换至 BSC Testnet (Chain ID {TARGET_CHAIN_ID}) 后再铸造工牌。
+          </p>
+          <button
+            onClick={() => switchChain({ chainId: TARGET_CHAIN_ID })}
+            disabled={isSwitching}
+            className="rounded-xl bg-red-500 px-4 py-2 text-xs font-bold text-white hover:bg-red-400 disabled:opacity-50"
+          >
+            {isSwitching ? '切换中...' : `🔄 切换至 BSC Testnet (${TARGET_CHAIN_ID})`}
+          </button>
+        </div>
+      )}
+
       {/* Mint Card */}
       <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
         <div className="space-y-1">
@@ -124,7 +166,7 @@ export default function BadgePage() {
           {needsApprove ? (
             <button
               onClick={handleApprove}
-              disabled={!address || isPending || isConfirming}
+              disabled={!address || isPending || isConfirming || isSwitching}
               className="rounded-2xl bg-amber-500 px-6 py-3 text-sm font-bold text-black hover:bg-amber-400 disabled:opacity-50"
             >
               {isPending || isConfirming ? '授权中...' : '1. Approve ZHUZHU'}
@@ -138,7 +180,8 @@ export default function BadgePage() {
                 !hasEnough ||
                 badgeCount >= 3 ||
                 isPending ||
-                isConfirming
+                isConfirming ||
+                isSwitching
               }
               className="rounded-2xl bg-pig-500 px-6 py-3 text-sm font-bold text-white hover:bg-pig-600 disabled:opacity-50"
             >
@@ -156,7 +199,7 @@ export default function BadgePage() {
         </div>
       </div>
 
-      {error && <p className="text-xs text-red-400">操作失败：{error.message.slice(0, 120)}</p>}
+      {error && <p className="text-xs text-red-400">操作失败：{formatContractError(error)}</p>}
 
       {/* My Badges */}
       <section className="space-y-4">

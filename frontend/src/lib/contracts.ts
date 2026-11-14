@@ -1,5 +1,7 @@
 import { parseAbi, type Address } from 'viem';
 
+export const TARGET_CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID || 97);
+
 export const AGENT_REGISTRY_ADDRESS = (process.env.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS ||
   '0x0000000000000000000000000000000000000000') as Address;
 
@@ -8,6 +10,59 @@ export const ZHUZHU_TOKEN_ADDRESS = (process.env.NEXT_PUBLIC_ZHUZHU_TOKEN_ADDRES
 
 export const PIG_BADGE_ADDRESS = (process.env.NEXT_PUBLIC_PIG_BADGE_ADDRESS ||
   '0x0000000000000000000000000000000000000000') as Address;
+
+export function formatContractError(err: unknown): string {
+  if (!err) return '未知错误，请稍后重试';
+  const raw = err instanceof Error ? err.message : String(err);
+  const msg = raw.toLowerCase();
+
+  if (msg.includes('user rejected') || msg.includes('userrevoked') || msg.includes('rejected the request') || msg.includes('user denied')) {
+    return '您已在钱包中取消签名或拒绝交易';
+  }
+  if (msg.includes('chainmismatch') || msg.includes('does not match the target chain') || msg.includes('wrong network') || msg.includes('unsupported chain')) {
+    return `钱包当前网络不匹配，请先切换至 BSC Testnet (Chain ID ${TARGET_CHAIN_ID})`;
+  }
+  if (msg.includes('insufficient funds') || msg.includes('exceeds the balance of the account')) {
+    return '钱包 tBNB 余额不足以支付金额或 Gas 费';
+  }
+  if (msg.includes('only bsc ai agent wallet')) {
+    return '仅限已激活 .ai ID 的 BSC AI Agent 钱包参与，请先完成第 0 步激活';
+  }
+  if (msg.includes('must end with .ai')) {
+    return 'Agent ID 必须以 .ai 结尾（长度 4-32 个字符）';
+  }
+  if (msg.includes('agentid taken')) {
+    return '该 .ai Agent ID 已被其他钱包占用，请换一个名称';
+  }
+  if (msg.includes('already activated')) {
+    return '当前钱包已经激活过 .ai Agent ID';
+  }
+  if (msg.includes('wallet cap')) {
+    return '已达到单钱包铸造/持有上限';
+  }
+  if (msg.includes('trading not open')) {
+    return '尚未开盘（Launch 后才可开始 Agent 养猪打卡）';
+  }
+  if (msg.includes('pigs are sleeping')) {
+    return '猪仔还在休息中，需等待 8 小时冷却结束再打卡';
+  }
+  if (msg.includes('agent must be ai agent wallet')) {
+    return '被委托的 Agent 地址必须先在 AgentWalletRegistry 激活 .ai ID';
+  }
+  if (msg.includes('bad agent sig') || msg.includes('bad sig') || msg.includes('expired')) {
+    return 'Agent 签名无效或已过期';
+  }
+  if (msg.includes('need more xp')) {
+    return '当前经验 XP 不足，无法升级';
+  }
+  if (msg.includes('exceeds allowance') || msg.includes('insufficient allowance')) {
+    return 'ZHUZHU 授权额度不足，请先点击 Approve 授权';
+  }
+  if (msg.includes('timeout') || msg.includes('timed out') || msg.includes('http request failed') || msg.includes('fetch failed') || msg.includes('network error')) {
+    return 'BSC Testnet RPC 节点网络波动，请稍后重试';
+  }
+  return raw.split('\n')[0].slice(0, 120);
+}
 
 export const AGENT_REGISTRY_ABI = parseAbi([
   'function isAgentWallet(address account) view returns (bool)',

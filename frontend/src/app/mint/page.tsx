@@ -5,24 +5,30 @@ import { formatEther, parseEther, isAddress } from 'viem';
 import {
   useAccount,
   useReadContract,
+  useSwitchChain,
   useWaitForTransactionReceipt,
   useWriteContract,
 } from 'wagmi';
 import {
   AGENT_REGISTRY_ABI,
   AGENT_REGISTRY_ADDRESS,
+  TARGET_CHAIN_ID,
   ZHUZHU_ABI,
   ZHUZHU_TOKEN_ADDRESS,
+  formatContractError,
 } from '@/lib/contracts';
 
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000' as const;
 
 export default function MintPage() {
-  const { address } = useAccount();
+  const { address, isConnected, chainId } = useAccount();
+  const { switchChain, switchChainAsync, isPending: isSwitching } = useSwitchChain();
   const [packs, setPacks] = useState(1);
   const [refInput, setRefInput] = useState('');
   const [agentName, setAgentName] = useState('my-pig.ai');
   const [copied, setCopied] = useState(false);
+
+  const isWrongChain = isConnected && chainId !== TARGET_CHAIN_ID;
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -35,6 +41,7 @@ export default function MintPage() {
     abi: AGENT_REGISTRY_ABI,
     functionName: 'isAgentWallet',
     args: address ? [address] : undefined,
+    chainId: TARGET_CHAIN_ID,
     query: { enabled: Boolean(address) },
   });
 
@@ -43,6 +50,7 @@ export default function MintPage() {
     abi: AGENT_REGISTRY_ABI,
     functionName: 'agentIdOf',
     args: address ? [address] : undefined,
+    chainId: TARGET_CHAIN_ID,
     query: { enabled: Boolean(address) },
   });
 
@@ -50,12 +58,14 @@ export default function MintPage() {
     address: ZHUZHU_TOKEN_ADDRESS,
     abi: ZHUZHU_ABI,
     functionName: 'packsSold',
+    chainId: TARGET_CHAIN_ID,
   });
   const { data: packsOf, refetch: refetchMine } = useReadContract({
     address: ZHUZHU_TOKEN_ADDRESS,
     abi: ZHUZHU_ABI,
     functionName: 'packsOf',
     args: address ? [address] : undefined,
+    chainId: TARGET_CHAIN_ID,
     query: { enabled: Boolean(address) },
   });
   const { data: refReward, refetch: refetchRef } = useReadContract({
@@ -63,21 +73,27 @@ export default function MintPage() {
     abi: ZHUZHU_ABI,
     functionName: 'refRewards',
     args: address ? [address] : undefined,
+    chainId: TARGET_CHAIN_ID,
     query: { enabled: Boolean(address) },
   });
   const { data: tradingOpen, refetch: refetchTrading } = useReadContract({
     address: ZHUZHU_TOKEN_ADDRESS,
     abi: ZHUZHU_ABI,
     functionName: 'tradingOpen',
+    chainId: TARGET_CHAIN_ID,
   });
   const { data: mintEnd } = useReadContract({
     address: ZHUZHU_TOKEN_ADDRESS,
     abi: ZHUZHU_ABI,
     functionName: 'mintEnd',
+    chainId: TARGET_CHAIN_ID,
   });
 
   const { writeContract, data: txHash, isPending, error } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
+    hash: txHash,
+    chainId: TARGET_CHAIN_ID,
+  });
 
   useEffect(() => {
     if (isSuccess) {
@@ -110,18 +126,29 @@ export default function MintPage() {
     sold > 0 &&
     (sold >= 10_000 || (mintEnd !== undefined && Date.now() / 1000 >= Number(mintEnd)));
 
-  const handleActivateAgent = () => {
-    if (!validAiId) return;
+  const ensureTargetChain = async () => {
+    if (!isWrongChain) return true;
+    try {
+      await switchChainAsync({ chainId: TARGET_CHAIN_ID });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleActivateAgent = async () => {
+    if (!validAiId || !(await ensureTargetChain())) return;
     writeContract({
       address: AGENT_REGISTRY_ADDRESS,
       abi: AGENT_REGISTRY_ABI,
       functionName: 'activateAgentWallet',
       args: [agentName.trim(), BigInt(0), '0x'],
+      chainId: TARGET_CHAIN_ID,
     });
   };
 
-  const handleMint = () => {
-    if (effectivePacks <= 0) return;
+  const handleMint = async () => {
+    if (effectivePacks <= 0 || !(await ensureTargetChain())) return;
     const ref = isAddress(refInput) ? refInput : ZERO_ADDR;
     writeContract({
       address: ZHUZHU_TOKEN_ADDRESS,
@@ -129,22 +156,27 @@ export default function MintPage() {
       functionName: 'mintPacks',
       args: [BigInt(effectivePacks), ref],
       value: parseEther((effectivePacks * 0.01).toString()),
+      chainId: TARGET_CHAIN_ID,
     });
   };
 
-  const handleLaunch = () => {
+  const handleLaunch = async () => {
+    if (!(await ensureTargetChain())) return;
     writeContract({
       address: ZHUZHU_TOKEN_ADDRESS,
       abi: ZHUZHU_ABI,
       functionName: 'launch',
+      chainId: TARGET_CHAIN_ID,
     });
   };
 
-  const handleClaimRef = () => {
+  const handleClaimRef = async () => {
+    if (!(await ensureTargetChain())) return;
     writeContract({
       address: ZHUZHU_TOKEN_ADDRESS,
       abi: ZHUZHU_ABI,
       functionName: 'claimRefReward',
+      chainId: TARGET_CHAIN_ID,
     });
   };
 
@@ -167,8 +199,27 @@ export default function MintPage() {
         </p>
       </div>
 
+      {/* Wrong Network Warning */}
+      {isWrongChain && (
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-red-500/40 bg-red-500/15 p-5">
+          <div className="space-y-1">
+            <p className="font-bold text-red-200">⚠️ 当前钱包不在目标网络 (Chain ID {TARGET_CHAIN_ID})</p>
+            <p className="text-xs text-slate-300">
+              当前合约部署在 BSC Testnet (Chain ID {TARGET_CHAIN_ID})，请先切换网络后再进行激活或铸造操作。
+            </p>
+          </div>
+          <button
+            onClick={() => switchChain({ chainId: TARGET_CHAIN_ID })}
+            disabled={isSwitching}
+            className="rounded-xl bg-red-500 px-5 py-2 text-xs font-bold text-white hover:bg-red-400 disabled:opacity-50"
+          >
+            {isSwitching ? '切换中...' : `🔄 切换至 BSC Testnet (${TARGET_CHAIN_ID})`}
+          </button>
+        </div>
+      )}
+
       {/* Step 0: BSC AI Agent Wallet Gate */}
-      {address && !isAgentWallet && (
+      {address && !isWrongChain && isAgentWallet === false && (
         <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-6 space-y-4">
           <div className="space-y-1">
             <h2 className="font-bold text-amber-300">
@@ -188,16 +239,17 @@ export default function MintPage() {
             />
             <button
               onClick={handleActivateAgent}
-              disabled={!validAiId || isPending || isConfirming}
+              disabled={!validAiId || isPending || isConfirming || isSwitching}
               className="rounded-xl bg-amber-500 px-5 py-2 text-sm font-bold text-black hover:bg-amber-400 disabled:opacity-40"
             >
               {isPending || isConfirming ? '激活中...' : '激活 .ai Agent ID'}
             </button>
           </div>
+          {error && <p className="text-xs text-red-400">操作提示：{formatContractError(error)}</p>}
         </div>
       )}
 
-      {address && isAgentWallet && (
+      {address && !isWrongChain && isAgentWallet && (
         <div className="flex items-center justify-between rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-5 py-3 text-xs">
           <span className="text-emerald-300 font-semibold">
             ✅ 已验证 BSC AI Agent 钱包：{myAgentId}
@@ -317,7 +369,7 @@ export default function MintPage() {
           </button>
 
           {error && (
-            <p className="text-xs text-red-400">交易失败：{error.message.slice(0, 120)}</p>
+            <p className="text-xs text-red-400">交易失败：{formatContractError(error)}</p>
           )}
           {isSuccess && (
             <p className="text-xs text-emerald-400">🎉 链上操作成功！</p>

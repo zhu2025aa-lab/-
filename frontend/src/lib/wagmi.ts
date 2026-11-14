@@ -7,6 +7,7 @@ import {
   rainbowWallet,
   trustWallet,
 } from '@rainbow-me/rainbowkit/wallets';
+import { fallback } from 'viem';
 import { createConfig, http } from 'wagmi';
 import { bsc, bscTestnet, foundry } from 'wagmi/chains';
 
@@ -19,22 +20,22 @@ const defaultChainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID || 97);
 
 const chains =
   defaultChainId === 97
-    ? ([bscTestnet, bsc, foundry] as const)
+    ? ([bscTestnet] as const)
     : defaultChainId === 31337
-      ? ([foundry, bscTestnet, bsc] as const)
-      : ([bsc, bscTestnet, foundry] as const);
+      ? ([foundry] as const)
+      : ([bsc] as const);
 
 const connectors = connectorsForWallets(
   [
     {
       groupName: '推荐钱包（BSC / Agentic）',
       wallets: [
+        injectedWallet,
         binanceWallet,
         metaMaskWallet,
         okxWallet,
         trustWallet,
         rainbowWallet,
-        injectedWallet,
       ],
     },
   ],
@@ -49,9 +50,14 @@ export const config = createConfig({
   chains,
   transports: {
     [bsc.id]: http(process.env.NEXT_PUBLIC_BSC_RPC || 'https://bsc-dataseed.bnbchain.org'),
-    [bscTestnet.id]: http(
-      process.env.NEXT_PUBLIC_BSC_TESTNET_RPC || 'https://bsc-testnet-rpc.publicnode.com'
-    ),
+    [bscTestnet.id]: fallback([
+      http(
+        process.env.NEXT_PUBLIC_BSC_TESTNET_RPC ||
+          'https://data-seed-prebsc-1-s1.bnbchain.org:8545'
+      ),
+      http('https://data-seed-prebsc-2-s1.bnbchain.org:8545'),
+      http('https://bsc-testnet-rpc.publicnode.com'),
+    ]),
     [foundry.id]: http('http://127.0.0.1:8545'),
   },
   ssr: true,
