@@ -14,6 +14,9 @@ export const PIG_BADGE_ADDRESS = (process.env.NEXT_PUBLIC_PIG_BADGE_ADDRESS ||
 export function formatContractError(err: unknown): string {
   if (!err) return '未知错误，请稍后重试';
   const raw = err instanceof Error ? err.message : String(err);
+  if (raw.includes('当前为地址免密直连模式')) {
+    return raw;
+  }
   const msg = raw.toLowerCase();
 
   if (msg.includes('user rejected') || msg.includes('userrevoked') || msg.includes('rejected the request') || msg.includes('user denied')) {

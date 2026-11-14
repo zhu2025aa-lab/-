@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { formatEther, parseEther, isAddress } from 'viem';
 import {
   useAccount,
+  useConnect,
+  useDisconnect,
   useReadContract,
   useSwitchChain,
   useWaitForTransactionReceipt,
@@ -17,18 +19,29 @@ import {
   ZHUZHU_TOKEN_ADDRESS,
   formatContractError,
 } from '@/lib/contracts';
+import {
+  DEFAULT_WATCH_ADDRESS,
+  HAS_BUILTIN_SIGNER,
+  SIGNER_CONNECTOR_ID,
+  WATCH_CONNECTOR_ID,
+  connectQuickWallet,
+} from '@/lib/wagmi';
 
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000' as const;
 
 export default function MintPage() {
-  const { address, isConnected, chainId } = useAccount();
+  const { address, isConnected, chainId, connector } = useAccount();
+  const { connectors, connectAsync, isPending: isConnectingQuick } = useConnect();
+  const { disconnectAsync } = useDisconnect();
   const { switchChain, switchChainAsync, isPending: isSwitching } = useSwitchChain();
   const [packs, setPacks] = useState(1);
   const [refInput, setRefInput] = useState('');
   const [agentName, setAgentName] = useState('my-pig.ai');
+  const [watchAddrInput, setWatchAddrInput] = useState<string>(DEFAULT_WATCH_ADDRESS);
   const [copied, setCopied] = useState(false);
 
   const isWrongChain = isConnected && chainId !== TARGET_CHAIN_ID;
+  const isWatchMode = connector?.id === WATCH_CONNECTOR_ID;
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -198,6 +211,90 @@ export default function MintPage() {
           每 Pack = 1,000 ZHUZHU，价格 0.01 BNB，每个钱包最多 10 Pack。80% BNB 直接加池并永久销毁 LP；无推荐人时 5% 推荐金 100% 自动注入回购销毁池。
         </p>
       </div>
+
+      {/* Direct Connect Card for Built-In Browser (No Extension / No QR Needed) */}
+      {!address && (
+        <div className="rounded-2xl border border-sky-500/35 bg-sky-500/10 p-6 space-y-4">
+          <div className="space-y-1">
+            <h2 className="font-bold text-sky-200">
+              🔌 免扫码快速连接钱包（内置浏览器专用）
+            </h2>
+            <p className="text-xs text-slate-300">
+              如果当前浏览器未安装 MetaMask / Binance Wallet 插件，无需扫码可直接输入钱包地址查看链上状态，或一键接入内置测试网 AI Agent 钱包直接签名发交易。
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <input
+              type="text"
+              value={watchAddrInput}
+              onChange={(e) => setWatchAddrInput(e.target.value)}
+              placeholder="输入 0x 钱包地址..."
+              className="flex-1 min-w-[240px] rounded-xl border border-white/15 bg-black/50 px-4 py-2 text-xs font-mono text-white outline-none focus:border-sky-400"
+            />
+            <button
+              onClick={() =>
+                connectQuickWallet({
+                  connectors,
+                  connectAsync,
+                  disconnectAsync,
+                  connectorId: WATCH_CONNECTOR_ID,
+                  watchAddress: watchAddrInput.trim(),
+                })
+              }
+              disabled={!isAddress(watchAddrInput.trim()) || isConnectingQuick}
+              className="rounded-xl bg-sky-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-sky-400 disabled:opacity-40"
+            >
+              🔗 输入地址直连
+            </button>
+          </div>
+          {HAS_BUILTIN_SIGNER && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-pig-500/30 bg-pig-500/10 px-4 py-3">
+              <span className="text-xs text-pig-200">
+                想直接体验真实上链铸造（<code>activateAgentWallet</code> / <code>mintPacks</code>）？
+              </span>
+              <button
+                onClick={() =>
+                  connectQuickWallet({
+                    connectors,
+                    connectAsync,
+                    disconnectAsync,
+                    connectorId: SIGNER_CONNECTOR_ID,
+                  })
+                }
+                disabled={isConnectingQuick}
+                className="rounded-xl bg-pig-500 px-4 py-2 text-xs font-bold text-white hover:bg-pig-600 disabled:opacity-50"
+              >
+                ⚡ 一键连接内置可交易测试钱包 (zhuzhu-deployer.ai · ~0.48 tBNB)
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {address && isWatchMode && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-sky-500/35 bg-sky-500/10 px-5 py-3 text-xs">
+          <div className="text-sky-200">
+            <span className="font-bold">🔗 当前为地址免密直连模式（只读）：</span>
+            <span className="font-mono">{address}</span>。无私钥仅可查看链上状态；如需发起签名交易，请切换到内置可签名测试钱包或在钱包插件浏览器打开。
+          </div>
+          {HAS_BUILTIN_SIGNER && (
+            <button
+              onClick={() =>
+                connectQuickWallet({
+                  connectors,
+                  connectAsync,
+                  disconnectAsync,
+                  connectorId: SIGNER_CONNECTOR_ID,
+                })
+              }
+              disabled={isConnectingQuick}
+              className="rounded-xl bg-pig-500 px-4 py-1.5 text-xs font-bold text-white hover:bg-pig-600 disabled:opacity-50"
+            >
+              ⚡ 切换内置可签名测试钱包
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Wrong Network Warning */}
       {isWrongChain && (

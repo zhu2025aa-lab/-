@@ -6,6 +6,8 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import {
   useAccount,
+  useConnect,
+  useDisconnect,
   useReadContract,
   useSwitchChain,
   useWaitForTransactionReceipt,
@@ -17,6 +19,13 @@ import {
   TARGET_CHAIN_ID,
   formatContractError,
 } from '@/lib/contracts';
+import {
+  DEFAULT_WATCH_ADDRESS,
+  HAS_BUILTIN_SIGNER,
+  SIGNER_CONNECTOR_ID,
+  WATCH_CONNECTOR_ID,
+  connectQuickWallet,
+} from '@/lib/wagmi';
 
 const NAV_ITEMS = [
   { href: '/', label: '首页' },
@@ -28,12 +37,16 @@ const NAV_ITEMS = [
 
 export function Navbar() {
   const pathname = usePathname();
-  const { address, isConnected, chainId } = useAccount();
+  const { address, isConnected, chainId, connector } = useAccount();
+  const { connectors, connectAsync, isPending: isConnectingQuick } = useConnect();
+  const { disconnectAsync } = useDisconnect();
   const { switchChain, switchChainAsync, isPending: isSwitching } = useSwitchChain();
   const [showBindModal, setShowBindModal] = useState(false);
   const [agentName, setAgentName] = useState('piggy.ai');
 
   const isWrongChain = isConnected && chainId !== TARGET_CHAIN_ID;
+  const isWatchMode = connector?.id === WATCH_CONNECTOR_ID;
+  const isBuiltinSigner = connector?.id === SIGNER_CONNECTOR_ID;
 
   const { data: agentId, refetch: refetchAgentId } = useReadContract({
     address: AGENT_REGISTRY_ADDRESS,
@@ -106,7 +119,79 @@ export function Navbar() {
           })}
         </nav>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {!isConnected && (
+            <>
+              <button
+                onClick={() =>
+                  connectQuickWallet({
+                    connectors,
+                    connectAsync,
+                    disconnectAsync,
+                    connectorId: WATCH_CONNECTOR_ID,
+                    watchAddress: DEFAULT_WATCH_ADDRESS,
+                  })
+                }
+                disabled={isConnectingQuick}
+                className="rounded-xl border border-sky-500/40 bg-sky-500/15 px-3 py-1.5 text-xs font-semibold text-sky-200 hover:bg-sky-500/25 disabled:opacity-50"
+              >
+                🔗 直连 0x7b30...a1b8
+              </button>
+              {HAS_BUILTIN_SIGNER && (
+                <button
+                  onClick={() =>
+                    connectQuickWallet({
+                      connectors,
+                      connectAsync,
+                      disconnectAsync,
+                      connectorId: SIGNER_CONNECTOR_ID,
+                    })
+                  }
+                  disabled={isConnectingQuick}
+                  className="rounded-xl border border-pig-500/40 bg-pig-500/15 px-3 py-1.5 text-xs font-semibold text-pig-200 hover:bg-pig-500/25 disabled:opacity-50"
+                >
+                  ⚡ 内置测试钱包
+                </button>
+              )}
+            </>
+          )}
+          {isConnected && HAS_BUILTIN_SIGNER && !isBuiltinSigner && (
+            <button
+              onClick={() =>
+                connectQuickWallet({
+                  connectors,
+                  connectAsync,
+                  disconnectAsync,
+                  connectorId: SIGNER_CONNECTOR_ID,
+                })
+              }
+              disabled={isConnectingQuick}
+              className="hidden sm:inline-flex rounded-xl border border-pig-500/40 bg-pig-500/15 px-3 py-1.5 text-xs font-semibold text-pig-200 hover:bg-pig-500/25 disabled:opacity-50"
+            >
+              ⚡ 切换内置可签名测试钱包
+            </button>
+          )}
+          {isConnected && isBuiltinSigner && (
+            <button
+              onClick={() =>
+                connectQuickWallet({
+                  connectors,
+                  connectAsync,
+                  disconnectAsync,
+                  connectorId: WATCH_CONNECTOR_ID,
+                })
+              }
+              disabled={isConnectingQuick}
+              className="hidden sm:inline-flex rounded-xl border border-sky-500/40 bg-sky-500/15 px-3 py-1.5 text-xs font-semibold text-sky-200 hover:bg-sky-500/25 disabled:opacity-50"
+            >
+              🔗 切回 0x7b30...a1b8
+            </button>
+          )}
+          {isWatchMode && (
+            <span className="hidden md:inline-flex items-center rounded-xl border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-[11px] font-semibold text-sky-300">
+              地址直连(只读)
+            </span>
+          )}
           {isWrongChain && (
             <button
               onClick={() => switchChain({ chainId: TARGET_CHAIN_ID })}
