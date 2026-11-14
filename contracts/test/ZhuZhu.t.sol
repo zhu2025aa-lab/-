@@ -2,11 +2,10 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {AgentWalletRegistry} from "../src/AgentWalletRegistry.sol";
-import {GamePool} from "../src/GamePool.sol";
-import {TeamVesting} from "../src/TeamVesting.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {AgentIdRegistry} from "../src/AgentIdRegistry.sol";
 import {ZhuZhuToken} from "../src/ZhuZhuToken.sol";
-import {PigBadge} from "../src/PigBadge.sol";
+import {ZhuZhuDividendTracker} from "../src/ZhuZhuDividendTracker.sol";
 
 contract MockWBNB {
     mapping(address => uint256) public balanceOf;
@@ -41,266 +40,227 @@ contract MockFactory {
 contract MockRouter {
     address public immutable factory;
     address public immutable WETH;
-    constructor(address _f, address _w) { factory = _f; WETH = _w; }
-    function swapExactETHForTokensSupportingFeeOnTransferTokens(
-        uint256, address[] calldata, address, uint256
-    ) external payable {}
+    uint256 public swapPayoutBnb = 0.2 ether;
+
+    constructor(address _f, address _w) {
+        factory = _f;
+        WETH = _w;
+    }
+
+    receive() external payable {}
+
+    function swapExactTokensForETHSupportingFeeOnTransferTokens(
+        uint256 amountIn,
+        uint256,
+        address[] calldata path,
+        address to,
+        uint256
+    ) external {
+        address p = MockFactory(factory).getPair(path[0], path[1]);
+        IERC20(path[0]).transferFrom(msg.sender, p, amountIn);
+        (bool ok, ) = payable(to).call{value: swapPayoutBnb}("");
+        require(ok, "mock payout fail");
+    }
 }
 
 contract ZhuZhuTest is Test {
-    AgentWalletRegistry registry;
-    GamePool pool;
-    TeamVesting vesting;
+    AgentIdRegistry registry;
     ZhuZhuToken token;
-    PigBadge badge;
+    ZhuZhuDividendTracker tracker;
     MockWBNB wbnb;
     MockFactory factory;
     MockRouter router;
 
     address alice = makeAddr("alice");
     address bob = makeAddr("bob");
-    address agent = makeAddr("agent");
+    address smallHolder = makeAddr("smallHolder");
     address normie = makeAddr("normie");
-    address marketing = makeAddr("marketing");
-    address team = makeAddr("team");
-    uint256 verifierPk = 0xA11CE;
-    address verifier;
+    address community = makeAddr("community");
+    address userWallet = 0x7B3024717969CA7C3dcd5aA681FAFF7B335Da1B8;
 
     function setUp() public {
-        verifier = vm.addr(verifierPk);
         wbnb = new MockWBNB();
         factory = new MockFactory();
         router = new MockRouter(address(factory), address(wbnb));
+        vm.deal(address(router), 20 ether);
 
-        registry = new AgentWalletRegistry(verifier, false);
-        pool = new GamePool();
-        vesting = new TeamVesting(team, uint64(block.timestamp), 90 days, 365 days);
+        registry = new AgentIdRegistry();
+        address[] memory accts = new address[](3);
+        string[] memory handles = new string[](3);
+        accts[0] = userWallet;
+        handles[0] = "zhuzhu-7b30";
+        accts[1] = alice;
+        handles[1] = "alice";
+        accts[2] = bob;
+        handles[2] = "bob";
+        registry.setHandlesBatch(accts, handles);
+
         token = new ZhuZhuToken(
             address(router),
-            address(pool),
-            address(vesting),
-            marketing,
-            address(registry)
-        );
-        badge = new PigBadge(
-            address(token),
-            address(pool),
             address(registry),
-            verifier,
-            ""
+            community,
+            0
         );
-
-        pool.init(address(token), address(badge));
-        pool.renounceOwnership();
-
-        vm.prank(alice);
-        registry.activateAgentWallet("alice.ai", 0, "");
-        vm.prank(bob);
-        registry.activateAgentWallet("bob.ai", 0, "");
-        vm.prank(agent);
-        registry.activateAgentWallet("bot.ai", 0, "");
+        tracker = ZhuZhuDividendTracker(payable(token.DIVIDEND_TRACKER()));
 
         vm.deal(alice, 10 ether);
         vm.deal(bob, 10 ether);
         vm.deal(normie, 10 ether);
+        vm.deal(userWallet, 10 ether);
     }
 
-    function test_PackMintAndReferral() public {
-        vm.prank(alice);
-        token.mintPacks{value: 0.02 ether}(2, address(0));
-        assertEq(token.balanceOf(alice), 2_000 ether);
-        assertEq(token.packsOf(alice), 2);
-        assertEq(token.opsBnb(), 0.001 ether);     // 5% of 0.02
-        assertEq(token.buybackBnb(), 0.003 ether); // 10% + 5% = 15% of 0.02
+    function test_AgentIdVerificationAndSelfRegister() public {
+        assertTrue(token.hasAgentId(userWallet));
+        assertEq(token.agentHandleOf(userWallet), "zhuzhu-7b30");
+        assertEq(registry.handleOf(alice), "alice");
+        assertFalse(token.hasAgentId(normie));
 
+        vm.prank(normie);
+        vm.expectRevert("Binance AI Agent ID (.ai) required");
+        token.mint{value: 0.02 ether}(1);
+
+        vm.prank(normie);
+        registry.register("normie-bot");
+        assertTrue(token.hasAgentId(normie));
+        assertEq(registry.handleOf(normie), "normie-bot");
+
+        vm.prank(normie);
+        token.mint{value: 0.02 ether}(1);
+        assertEq(token.balanceOf(normie), 400_000_000 ether);
+    }
+
+    function test_MintPricingAndWalletCap() public {
+        assertEq(token.LOT_PRICE(), 0.02 ether);
+        assertEq(token.MAX_LOTS_PER_WALLET(), 10);
+        assertEq(token.TOTAL_LOTS(), 1_500);
+        assertEq(token.TOKENS_PER_LOT(), 400_000_000 ether);
+        assertEq(token.totalSupply(), 1_000_000_000_000 ether);
+        assertEq(token.balanceOf(community), 100_000_000_000 ether);
+
+        // Wrong BNB reverts
+        vm.prank(alice);
+        vm.expectRevert("incorrect BNB amount");
+        token.mint{value: 0.01 ether}(1);
+
+        // Mint 4 lots = 0.08 BNB -> 1.6B ZHUZHU
+        vm.prank(alice);
+        token.mint{value: 0.08 ether}(4);
+        assertEq(token.mintedLots(alice), 4);
+        assertEq(token.lotsMinted(), 4);
+        assertEq(token.balanceOf(alice), 1_600_000_000 ether);
+
+        // Mint remaining 6 lots -> 10 lots total = 0.20 BNB -> 4B ZHUZHU
+        vm.prank(alice);
+        token.mint{value: 0.12 ether}(6);
+        assertEq(token.mintedLots(alice), 10);
+        assertEq(token.balanceOf(alice), 4_000_000_000 ether);
+
+        // 11th lot reverts
+        vm.prank(alice);
+        vm.expectRevert("wallet cap reached");
+        token.mint{value: 0.02 ether}(1);
+    }
+
+    function test_AutoLaunchAt1500LotsAndLpBurned() public {
+        // 150 wallets x 10 lots = 1,500 lots = 30 BNB
+        for (uint256 i = 0; i < 150; i++) {
+            address minter = address(uint160(0x10000 + i));
+            vm.deal(minter, 1 ether);
+            vm.prank(minter);
+            registry.register(string(abi.encodePacked("agent-", vm.toString(i))));
+            vm.prank(minter);
+            token.mint{value: 0.20 ether}(10);
+        }
+
+        assertEq(token.lotsMinted(), 1_500);
+        assertTrue(token.tradingLive());
+        assertFalse(token.mintOpen());
+        assertEq(token.raisedBnb(), 0);
+
+        address pair = token.pair();
+        assertTrue(pair != address(0));
+        assertEq(token.balanceOf(pair), 300_000_000_000 ether);
+        assertEq(wbnb.balanceOf(pair), 30 ether);
+        assertEq(MockPair(pair).balanceOf(token.DEAD()), 1000 ether);
+    }
+
+    function test_ManualLaunchPartialMintBurnsUnsold() public {
+        vm.prank(alice);
+        token.mint{value: 0.04 ether}(2);
+
+        token.launch();
+        assertTrue(token.tradingLive());
+        address pair = token.pair();
+        uint256 expectedLpTokens = (token.LP_ALLOC() * 2) / 1500;
+        assertEq(token.balanceOf(pair), expectedLpTokens);
+        assertEq(wbnb.balanceOf(pair), 0.04 ether);
+        assertGt(token.balanceOf(token.DEAD()), 0);
+
+        // Minting after launch reverts
         vm.prank(bob);
-        token.mintPacks{value: 0.01 ether}(1, alice);
-        assertEq(token.refRewards(alice), 0.0005 ether);
-
-        uint256 beforeBal = alice.balance;
-        vm.prank(alice);
-        token.claimRefReward();
-        assertEq(alice.balance - beforeBal, 0.0005 ether);
+        vm.expectRevert("mint closed");
+        token.mint{value: 0.02 ether}(1);
     }
 
-    function test_LaunchAndPigBadgeWorkflow() public {
+    function test_TaxSwapAndHoldToEarnDividends() public {
+        // Alice mints 10 lots (4B tokens), Bob mints 10 lots (4B tokens)
         vm.prank(alice);
-        token.mintPacks{value: 0.1 ether}(10, address(0)); // 10,000 ZHUZHU
+        token.mint{value: 0.20 ether}(10);
+        vm.prank(bob);
+        token.mint{value: 0.20 ether}(10);
 
-        vm.startPrank(alice);
-        token.approve(address(badge), type(uint256).max);
-        uint256 id = badge.mint();
-        assertEq(token.balanceOf(alice), 9_500 ether);
-        badge.assignAgent(id, agent);
-        vm.stopPrank();
-
-        // Cannot work before tradingOpen
-        vm.prank(agent);
-        vm.expectRevert("trading not open");
-        badge.work(id);
-
-        // Fast-forward past 72h mint window and launch
-        vm.warp(block.timestamp + 73 hours);
         token.launch();
-        assertTrue(token.tradingOpen());
-        assertTrue(MockPair(token.pair()).balanceOf(token.DEAD()) > 0);
+        address pair = token.pair();
 
-        // Agent works 10 times (8h cooldown each) -> 100 XP
-        for (uint256 i = 0; i < 10; i++) {
-            vm.prank(agent);
-            badge.work(id);
-            vm.warp(block.timestamp + 8 hours);
-        }
+        // Bob transfers 500k ZHUZHU (< 1M threshold) to smallHolder -> not eligible
+        vm.prank(bob);
+        token.transfer(smallHolder, 500_000 ether);
+        assertFalse(tracker.isEligible(smallHolder));
+        assertTrue(tracker.isEligible(alice));
 
-        (uint8 lvl, uint32 xp, uint32 pigs, , , address assigned, ) = badge.badges(id);
-        assertEq(lvl, 1);
-        assertEq(xp, 100);
-        assertEq(pigs, 11); // 1 initial + 10 works
-        assertEq(assigned, agent);
-        assertGt(token.balanceOf(alice), 9_500 ether);
+        // Simulate a buy (from pair -> bob) of 1,000,000,000 ZHUZHU: takes 3% (30M)
+        vm.prank(pair);
+        token.transfer(bob, 1_000_000_000 ether);
+        assertEq(token.balanceOf(address(token)), 30_000_000 ether);
 
-        // Alice levels up to Lv2 (rebalanced: burns 300 ZHUZHU)
-        uint256 balBeforeUpgrade = token.balanceOf(alice);
+        // Second buy triggers >50M swapThreshold in contract (60M >= 50M)
+        vm.prank(pair);
+        token.transfer(bob, 1_000_000_000 ether);
+        assertEq(token.balanceOf(address(token)), 60_000_000 ether);
+
+        uint256 communityBnbBefore = community.balance;
+
+        // Alice sells 100M ZHUZHU to pair -> triggers auto swap of 50M tax tokens for 0.2 BNB!
+        // Split 50/50: 0.1 BNB to DividendTracker, 0.1 BNB to communityWallet
         vm.prank(alice);
-        badge.levelUp(id);
-        assertEq(balBeforeUpgrade - token.balanceOf(alice), 300 ether);
-        (lvl, xp, , , , , ) = badge.badges(id);
-        assertEq(lvl, 2);
-        assertEq(xp, 0);
+        token.transfer(pair, 100_000_000 ether);
 
-        // Transferring badge revokes agent
+        assertEq(community.balance - communityBnbBefore, 0.1 ether);
+        assertApproxEqAbs(tracker.totalDistributed(), 0.1 ether, 1e12);
+        assertEq(tracker.withdrawable(smallHolder), 0);
+
+        uint256 aliceWithdrawable = tracker.withdrawable(alice);
+        uint256 bobWithdrawable = tracker.withdrawable(bob);
+        assertGt(aliceWithdrawable, 0);
+        assertGt(bobWithdrawable, 0);
+
+        uint256 aliceBalBefore = alice.balance;
         vm.prank(alice);
-        badge.transferFrom(alice, bob, id);
-        (, , , , , assigned, ) = badge.badges(id);
-        assertEq(assigned, address(0));
+        tracker.claim();
+        assertEq(alice.balance - aliceBalBefore, aliceWithdrawable);
+        assertEq(tracker.withdrawable(alice), 0);
     }
 
-    function test_TeamVestingCliffSchedule() public {
-        uint256 start = block.timestamp;
-        vm.warp(start + 89 days);
-        assertEq(vesting.releasable(address(token)), 0);
+    function test_PendingDividendsBeforeEligibleHolder() public {
+        // Send 0.05 BNB while eligibleSupply == 0
+        (bool ok, ) = payable(address(tracker)).call{value: 0.05 ether}("");
+        assertTrue(ok);
+        assertEq(tracker.pendingDividends(), 0.05 ether);
 
-        vm.warp(start + 90 days);
-        assertEq(vesting.releasable(address(token)), 0);
-
-        vm.warp(start + 90 days + 182 days + 12 hours);
-        assertApproxEqRel(vesting.releasable(address(token)), 500_000 ether, 1e15);
-
-        vm.warp(start + 90 days + 365 days);
-        assertEq(vesting.releasable(address(token)), 1_000_000 ether);
-    }
-
-    function test_AssignAgentWithSigAndReplayProtection() public {
+        // First eligible minter receives queued dividends once eligibleSupply > 0
         vm.prank(alice);
-        token.mintPacks{value: 0.01 ether}(1, address(0));
-
-        vm.startPrank(alice);
-        token.approve(address(badge), type(uint256).max);
-        uint256 id = badge.mint();
-        vm.stopPrank();
-
-        bytes32 agentIdHash = keccak256("bot.ai");
-        uint256 deadline = block.timestamp + 1 hours;
-        uint256 nonce = badge.nonces(id);
-
-        bytes32 domainSeparator = keccak256(
-            abi.encode(
-                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-                keccak256("PigBadge"),
-                keccak256("1"),
-                block.chainid,
-                address(badge)
-            )
-        );
-        bytes32 structHash = keccak256(
-            abi.encode(badge.ASSIGN_TYPEHASH(), id, alice, agent, agentIdHash, nonce, deadline)
-        );
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(verifierPk, digest);
-        bytes memory sig = abi.encodePacked(r, s, v);
-
-        vm.prank(alice);
-        badge.assignAgentWithSig(id, agent, agentIdHash, deadline, sig);
-
-        (, , , , , address assigned, bool verified) = badge.badges(id);
-        assertEq(assigned, agent);
-        assertTrue(verified);
-        assertEq(badge.nonces(id), 1);
-
-        vm.prank(alice);
-        vm.expectRevert("bad sig");
-        badge.assignAgentWithSig(id, agent, agentIdHash, deadline, sig);
-    }
-
-    function test_OnChainTokenURIAndGetAgentBadges() public {
-        vm.prank(alice);
-        token.mintPacks{value: 0.01 ether}(1, address(0));
-
-        vm.startPrank(alice);
-        token.approve(address(badge), type(uint256).max);
-        uint256 id = badge.mint();
-        badge.assignAgent(id, agent);
-        vm.stopPrank();
-
-        string memory uri = badge.tokenURI(id);
-        assertTrue(_startsWith(uri, "data:application/json;base64,"));
-
-        (bool readyZero, uint256 nextZero) = badge.canWork(999);
-        assertFalse(readyZero);
-        assertEq(nextZero, 0);
-
-        vm.warp(block.timestamp + 73 hours);
-        token.launch();
-
-        (uint256[] memory ids, bool[] memory readyList, ) = badge.getAgentBadges(agent);
-        assertEq(ids.length, 1);
-        assertEq(ids[0], id);
-        assertTrue(readyList[0]);
-    }
-
-    function test_RevertWhenNonAgentWalletParticipates() public {
-        // Non-agent wallet cannot mintPacks
-        vm.prank(normie);
-        vm.expectRevert("only BSC AI Agent Wallet");
-        token.mintPacks{value: 0.01 ether}(1, address(0));
-
-        // Alice mints pack & badge, cannot delegate to non-agent wallet
-        vm.prank(alice);
-        token.mintPacks{value: 0.01 ether}(1, address(0));
-        vm.startPrank(alice);
-        token.approve(address(badge), type(uint256).max);
-        uint256 id = badge.mint();
-        vm.expectRevert("agent must be AI Agent Wallet");
-        badge.assignAgent(id, normie);
-        vm.stopPrank();
-
-        // Non-.ai suffix is rejected
-        vm.prank(normie);
-        vm.expectRevert("must end with .ai");
-        registry.activateAgentWallet("normie.com", 0, "");
-
-        // After activating normie.ai, normie can mintPacks
-        vm.prank(normie);
-        registry.activateAgentWallet("normie.ai", 0, "");
-        vm.prank(normie);
-        token.mintPacks{value: 0.01 ether}(1, address(0));
-        assertEq(token.balanceOf(normie), 1_000 ether);
-    }
-
-    function test_LaunchZeroPacksDoesNotLock() public {
-        vm.warp(block.timestamp + 73 hours);
-        token.launch();
-        assertTrue(token.tradingOpen());
-        assertEq(token.pair(), address(0));
-    }
-
-    function _startsWith(string memory full, string memory prefix) internal pure returns (bool) {
-        bytes memory f = bytes(full);
-        bytes memory p = bytes(prefix);
-        if (f.length < p.length) return false;
-        for (uint256 i = 0; i < p.length; i++) {
-            if (f[i] != p[i]) return false;
-        }
-        return true;
+        token.mint{value: 0.02 ether}(1);
+        assertEq(tracker.pendingDividends(), 0);
+        assertApproxEqAbs(tracker.withdrawable(alice), 0.05 ether, 1e12);
     }
 }
