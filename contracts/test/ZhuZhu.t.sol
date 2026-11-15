@@ -117,7 +117,7 @@ contract ZhuZhuTest is Test {
 
         vm.prank(normie);
         vm.expectRevert("Binance AI Agent ID (.ai) required");
-        token.mint{value: 0.002 ether}(1);
+        token.mint{value: 0}(1);
 
         vm.prank(normie);
         registry.register("normie-bot");
@@ -125,31 +125,42 @@ contract ZhuZhuTest is Test {
         assertEq(registry.handleOf(normie), "normie-bot");
 
         vm.prank(normie);
-        token.mint{value: 0.002 ether}(1);
+        token.mint{value: 0}(1);
         assertEq(token.balanceOf(normie), 60_000_000 ether);
+        assertTrue(token.hasClaimedFree(normie));
+        assertEq(token.freeLotsMinted(), 1);
     }
 
     function test_MintPricingAndWalletCap() public {
         assertEq(token.LOT_PRICE(), 0.002 ether);
         assertEq(token.MAX_LOTS_PER_WALLET(), 10);
         assertEq(token.TOTAL_LOTS(), 10_000);
+        assertEq(token.FREE_LOTS(), 1_000);
+        assertEq(token.FREE_LOTS_PER_WALLET(), 1);
         assertEq(token.TOKENS_PER_LOT(), 60_000_000 ether);
         assertEq(token.totalSupply(), 1_000_000_000_000 ether);
         assertEq(token.balanceOf(community), 100_000_000_000 ether);
 
-        // Wrong BNB reverts
+        // Wrong BNB reverts (first 4 lots on fresh wallet = 1 free + 3 paid = 0.006 BNB)
         vm.prank(alice);
         vm.expectRevert("incorrect BNB amount");
-        token.mint{value: 0.001 ether}(1);
-
-        // Mint 4 lots = 0.008 BNB -> 240M ZHUZHU
-        vm.prank(alice);
         token.mint{value: 0.008 ether}(4);
+
+        // Mint 4 lots = 0.006 BNB (1st lot free, 3 paid lots) -> 240M ZHUZHU
+        vm.prank(alice);
+        token.mint{value: 0.006 ether}(4);
         assertEq(token.mintedLots(alice), 4);
         assertEq(token.lotsMinted(), 4);
+        assertEq(token.freeLotsMinted(), 1);
+        assertTrue(token.hasClaimedFree(alice));
         assertEq(token.balanceOf(alice), 240_000_000 ether);
 
-        // Mint remaining 6 lots -> 10 lots total = 0.02 BNB -> 600M ZHUZHU
+        // Trying another free 0 BNB lot on same wallet reverts
+        vm.prank(alice);
+        vm.expectRevert("already claimed 1 free lot");
+        token.mint{value: 0}(1);
+
+        // Mint remaining 6 paid lots -> 10 lots total = 0.018 BNB -> 600M ZHUZHU
         vm.prank(alice);
         token.mint{value: 0.012 ether}(6);
         assertEq(token.mintedLots(alice), 10);
@@ -161,18 +172,46 @@ contract ZhuZhuTest is Test {
         token.mint{value: 0.002 ether}(1);
     }
 
+    function test_FreeCapStopsAt1000AndChargesFullPriceAfter() public {
+        for (uint256 i = 0; i < 1_000; i++) {
+            address minter = address(uint160(0x20000 + i));
+            vm.prank(minter);
+            registry.register(string(abi.encodePacked("free-", vm.toString(i))));
+            vm.prank(minter);
+            token.mint{value: 0}(1);
+        }
+
+        assertEq(token.freeLotsMinted(), 1_000);
+        assertEq(token.lotsMinted(), 1_000);
+        assertEq(token.raisedBnb(), 0);
+        assertFalse(token.canClaimFree(alice));
+
+        (uint256 costWei, uint256 freeUsed) = token.quoteMintCost(alice, 1);
+        assertEq(costWei, 0.002 ether);
+        assertEq(freeUsed, 0);
+
+        vm.prank(alice);
+        vm.expectRevert("incorrect BNB amount");
+        token.mint{value: 0}(1);
+
+        vm.prank(alice);
+        token.mint{value: 0.002 ether}(1);
+        assertEq(token.balanceOf(alice), 60_000_000 ether);
+    }
+
     function test_AutoLaunchAt10000LotsAndLpBurned() public {
-        // 1,000 wallets x 10 lots = 10,000 lots = 20 BNB
+        // 1,000 wallets x 10 lots (1 free + 9 paid = 0.018 BNB each) = 10,000 lots = 18 BNB
         for (uint256 i = 0; i < 1_000; i++) {
             address minter = address(uint160(0x10000 + i));
             vm.deal(minter, 1 ether);
             vm.prank(minter);
             registry.register(string(abi.encodePacked("agent-", vm.toString(i))));
             vm.prank(minter);
-            token.mint{value: 0.02 ether}(10);
+            token.mint{value: 0.018 ether}(10);
         }
 
         assertEq(token.lotsMinted(), 10_000);
+        assertEq(token.freeLotsMinted(), 1_000);
         assertTrue(token.tradingLive());
         assertFalse(token.mintOpen());
         assertEq(token.raisedBnb(), 0);
@@ -180,34 +219,35 @@ contract ZhuZhuTest is Test {
         address pair = token.pair();
         assertTrue(pair != address(0));
         assertEq(token.balanceOf(pair), 300_000_000_000 ether);
-        assertEq(wbnb.balanceOf(pair), 20 ether);
+        assertEq(wbnb.balanceOf(pair), 18 ether);
         assertEq(MockPair(pair).balanceOf(token.DEAD()), 1000 ether);
     }
 
     function test_ManualLaunchPartialMintBurnsUnsold() public {
+        // 2 lots on fresh Alice: 1 free + 1 paid = 0.002 BNB
         vm.prank(alice);
-        token.mint{value: 0.004 ether}(2);
+        token.mint{value: 0.002 ether}(2);
 
         token.launch();
         assertTrue(token.tradingLive());
         address pair = token.pair();
         uint256 expectedLpTokens = (token.LP_ALLOC() * 2) / 10_000;
         assertEq(token.balanceOf(pair), expectedLpTokens);
-        assertEq(wbnb.balanceOf(pair), 0.004 ether);
+        assertEq(wbnb.balanceOf(pair), 0.002 ether);
         assertGt(token.balanceOf(token.DEAD()), 0);
 
         // Minting after launch reverts
         vm.prank(bob);
         vm.expectRevert("mint closed");
-        token.mint{value: 0.002 ether}(1);
+        token.mint{value: 0}(1);
     }
 
     function test_TaxSwapAndHoldToEarnDividends() public {
-        // Alice mints 10 lots (400M tokens), Bob mints 10 lots (400M tokens)
+        // Alice mints 10 lots (0.018 BNB), Bob mints 10 lots (0.018 BNB)
         vm.prank(alice);
-        token.mint{value: 0.02 ether}(10);
+        token.mint{value: 0.018 ether}(10);
         vm.prank(bob);
-        token.mint{value: 0.02 ether}(10);
+        token.mint{value: 0.018 ether}(10);
 
         token.launch();
         address pair = token.pair();
@@ -260,7 +300,7 @@ contract ZhuZhuTest is Test {
 
         // First eligible minter receives queued dividends once eligibleSupply > 0
         vm.prank(alice);
-        token.mint{value: 0.002 ether}(1);
+        token.mint{value: 0}(1);
         assertEq(tracker.pendingDividends(), 0);
         assertApproxEqAbs(tracker.withdrawable(alice), 0.05 ether, 1e12);
     }

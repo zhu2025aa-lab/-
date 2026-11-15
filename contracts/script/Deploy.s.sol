@@ -70,9 +70,9 @@ contract DeployScript is Script {
 
         address tracker = token.DIVIDEND_TRACKER();
 
-        // On Testnet / Anvil, seed 1 initial mint (0.002 BNB) + 0.005 BNB dividend pool for live preview
+        // On Testnet / Anvil, seed 1 free initial mint (0 BNB) + 0.005 BNB dividend pool for live preview
         if (block.chainid != 56) {
-            token.mint{value: 0.002 ether}(1);
+            token.mint{value: 0}(1);
             ZhuZhuDividendTracker(payable(tracker)).distributeDividends{value: 0.005 ether}();
         }
 

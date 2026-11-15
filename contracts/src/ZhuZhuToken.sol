@@ -54,11 +54,13 @@ contract ZhuZhuToken is ERC20, ERC20Burnable, Ownable, ReentrancyGuard {
     uint256 public constant LP_ALLOC      =   300_000_000_000 ether; // 30%
     uint256 public constant RESERVE_ALLOC =   100_000_000_000 ether; // 10%
 
-    // ---- Mint Parameters (0.002 BNB / lot, max 10 lots = 0.02 BNB) ----
-    uint256 public constant LOT_PRICE           = 0.002 ether;
-    uint256 public constant MAX_LOTS_PER_WALLET = 10;
-    uint256 public constant TOTAL_LOTS          = 10_000;
-    uint256 public constant TOKENS_PER_LOT      = 60_000_000 ether;
+    // ---- Mint Parameters (First 1,000 lots free: max 1 free/wallet; paid 0.002 BNB / lot, max 10 lots/wallet) ----
+    uint256 public constant LOT_PRICE            = 0.002 ether;
+    uint256 public constant MAX_LOTS_PER_WALLET  = 10;
+    uint256 public constant TOTAL_LOTS           = 10_000;
+    uint256 public constant FREE_LOTS            = 1_000;
+    uint256 public constant FREE_LOTS_PER_WALLET = 1;
+    uint256 public constant TOKENS_PER_LOT       = 60_000_000 ether;
 
     // ---- Tax Parameters (3% buy / 3% sell -> 1.5% BNB dividends + 1.5% community) ----
     uint256 public constant TAX_BPS = 300;
@@ -73,10 +75,12 @@ contract ZhuZhuToken is ERC20, ERC20Burnable, Ownable, ReentrancyGuard {
     address public pair;
     bool public tradingLive;
     uint256 public lotsMinted;
+    uint256 public freeLotsMinted;
     uint256 public raisedBnb;
     uint256 public swapThreshold = 50_000_000 ether;
 
     mapping(address => uint256) public mintedLots;
+    mapping(address => bool) public hasClaimedFree;
     mapping(address => bool) public isExempt;
 
     bool private _inSwap;
@@ -144,6 +148,23 @@ contract ZhuZhuToken is ERC20, ERC20Burnable, Ownable, ReentrancyGuard {
         return balanceOf(DEAD) + (TOTAL_SUPPLY - totalSupply());
     }
 
+    function canClaimFree(address account) public view returns (bool) {
+        return freeLotsMinted < FREE_LOTS && !hasClaimedFree[account];
+    }
+
+    function quoteMintCost(address account, uint256 lots)
+        public
+        view
+        returns (uint256 costWei, uint256 freeLotsUsed)
+    {
+        if (lots == 0) return (0, 0);
+        if (canClaimFree(account)) {
+            freeLotsUsed = 1;
+        }
+        uint256 paidLots = lots - freeLotsUsed;
+        costWei = paidLots * LOT_PRICE;
+    }
+
     // ================= Community Mint =================
 
     function mint(uint256 lots) external payable nonReentrant {
@@ -152,7 +173,17 @@ contract ZhuZhuToken is ERC20, ERC20Burnable, Ownable, ReentrancyGuard {
         require(lots > 0 && lots <= MAX_LOTS_PER_WALLET, "invalid lots");
         require(mintedLots[msg.sender] + lots <= MAX_LOTS_PER_WALLET, "wallet cap reached");
         require(lotsMinted + lots <= TOTAL_LOTS, "exceeds total lots");
-        require(msg.value == lots * LOT_PRICE, "incorrect BNB amount");
+        if (msg.value == 0 && hasClaimedFree[msg.sender]) {
+            revert("already claimed 1 free lot");
+        }
+
+        (uint256 costWei, uint256 freeLotsUsed) = quoteMintCost(msg.sender, lots);
+        require(msg.value == costWei, "incorrect BNB amount");
+
+        if (freeLotsUsed > 0) {
+            hasClaimedFree[msg.sender] = true;
+            freeLotsMinted += freeLotsUsed;
+        }
 
         lotsMinted += lots;
         mintedLots[msg.sender] += lots;
@@ -177,7 +208,7 @@ contract ZhuZhuToken is ERC20, ERC20Burnable, Ownable, ReentrancyGuard {
     function _launch() internal {
         require(!tradingLive, "already launched");
 
-        if (lotsMinted == 0) {
+        if (lotsMinted == 0 || raisedBnb == 0) {
             uint256 rem = balanceOf(address(this));
             if (rem > 0) {
                 super._update(address(this), DEAD, rem);

@@ -15,9 +15,9 @@
 
 ## Verified Contract Addresses (Chain ID 56)
 
-- ZHUZHU_TOKEN (ZhuZhuToken ERC-20 + Fair Mint): 0xCD7d8B1407e036ee8B352f600CADD8F91C1578f5
+- ZHUZHU_TOKEN (ZhuZhuToken ERC-20 + Fair Mint): 0x2b41Ba439E661b751BB1bc11cD0F1d4ADEE36218
 - AGENT_ID_REGISTRY (AgentIdRegistry .ai Handle Registry): 0x9fd5C0a14b71b169C770e6994155117afC680e8f
-- DIVIDEND_TRACKER (ZhuZhuDividendTracker BNB Dividends): 0xe4Ffc3d528E9dd3942655bc584611D9ad851c01c
+- DIVIDEND_TRACKER (ZhuZhuDividendTracker BNB Dividends): 0x1F2B7f19D13937008172ECaBB18096047188Db7D
 - PANCAKESWAP_V2_ROUTER: 0x10ED43C718714eb63d5aA57B78B54704E256024E
 - LP_BURN_ADDRESS (Dead Address): 0x000000000000000000000000000000000000dEaD
 
@@ -27,22 +27,24 @@
 - Decimals: 18
 - Total Supply: 1,000,000,000,000 ZHUZHU (1 Trillion)
   - 60% Fair Mint Pool: 600,000,000,000 ZHUZHU (10,000 lots total)
+    - First 1,000 lots (`FREE_LOTS = 1000`): **FREE (0 BNB)**, max **1 free lot per `.ai` wallet** (`FREE_LOTS_PER_WALLET = 1`)
+    - Remaining 9,000 lots (and additional lots per wallet): **0.002 BNB per lot** (2000000000000000 wei)
   - 30% Auto-LP Pool: 300,000,000,000 ZHUZHU paired with 100% raised BNB on PancakeSwap V2, LP tokens burned directly to 0x0000...dEaD
   - 10% Community & AI Agent Reserve: 100,000,000,000 ZHUZHU
-- Price Per Lot: 0.002 BNB (2000000000000000 wei)
 - Tokens Per Lot: 60,000,000 ZHUZHU
-- Max Lots Per Wallet: 10 lots = 0.02 BNB (20000000000000000 wei) = 600,000,000 ZHUZHU
-- Total Hardcap: 10,000 lots = 20 BNB
+- Max Lots Per Wallet: 10 lots = 600,000,000 ZHUZHU (0.018 BNB if claiming 1 free + 9 paid, or 0.02 BNB after free pool exhausted)
+- Total Hardcap: 10,000 lots = 18 BNB (1,000 free lots + 9,000 × 0.002 BNB)
 - Post-Launch Trading Tax: 3% (1.5% auto-swapped to BNB dividends via DIVIDEND_TRACKER, 1.5% ecosystem/marketing)
 - Minimum Balance for BNB Dividends: 1,000,000 ZHUZHU (1000000000000000000000000 wei)
 
-## Autonomous Execution Protocol (Read -> Register if needed -> Mint)
+## Autonomous Execution Protocol (Read -> Register if needed -> Quote -> Mint)
 
-### Step 1: Preflight Read-Only Checks on ZHUZHU_TOKEN (0xCD7d8B1407e036ee8B352f600CADD8F91C1578f5)
+### Step 1: Preflight Read-Only Checks on ZHUZHU_TOKEN (0x2b41Ba439E661b751BB1bc11cD0F1d4ADEE36218)
 1. `mintOpen()` [selector: 0x24bbd049] -> MUST return `true`.
-2. `lotsMinted()` -> check remaining global lots (`10000 - lotsMinted`).
+2. `lotsMinted()` & `freeLotsMinted()` -> check remaining global lots (`10000 - lotsMinted`) and free quota (`1000 - freeLotsMinted`).
 3. `mintedLots(botAddress)` [selector: 0x51ce9189] -> compute `remainingQuota = 10 - mintedLots`. Target `lots` MUST satisfy `1 <= lots <= min(remainingQuota, 10000 - lotsMinted)`.
-4. `hasAgentId(botAddress)` [selector: 0x4eab3ef2] -> returns `bool` (automatically recognizes official SPACE ID `.ai` holders on `0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F` as well as direct registrations).
+4. `quoteMintCost(botAddress, targetLots)` -> returns exact `(costWei, freeLotsUsed)` to send as `msg.value`. (When `canClaimFree(botAddress) == true` and `targetLots == 1`, `costWei == 0`!)
+5. `hasAgentId(botAddress)` [selector: 0x4eab3ef2] -> returns `bool` (automatically recognizes official SPACE ID `.ai` holders on `0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F` as well as direct registrations).
 
 ### Step 2: Auto-Register .ai Agent ID (ONLY if `hasAgentId(botAddress) == false`)
 - Target Contract: AGENT_ID_REGISTRY (`0x9fd5C0a14b71b169C770e6994155117afC680e8f`)
@@ -50,26 +52,26 @@
 - Handle constraints: lowercase letters/numbers/hyphens, unique (e.g., `"zhuzhu-ai-8821"`). If transaction reverts with `handle taken`, retry with a fresh unique suffix.
 - Wait for confirmation and re-verify `ZHUZHU_TOKEN.hasAgentId(botAddress) == true`.
 
-### Step 3: Execute Fair Mint on ZHUZHU_TOKEN (`0xCD7d8B1407e036ee8B352f600CADD8F91C1578f5`)
+### Step 3: Execute Fair Mint on ZHUZHU_TOKEN (`0x2b41Ba439E661b751BB1bc11cD0F1d4ADEE36218`)
 - Function: `mint(uint256 lots)` [selector: `0xa0712d68`]
-- Payable Value: `lots * 2000000000000000` wei (`0.002 BNB * lots`)
-- Example 1 — Mint 1 lot (0.002 BNB = 2000000000000000 wei -> 60,000,000 ZHUZHU):
-  - `to`: `0xCD7d8B1407e036ee8B352f600CADD8F91C1578f5`
-  - `value`: `2000000000000000`
+- Payable Value: exact `costWei` returned by `quoteMintCost(botAddress, lots)` (for wallets with 1 unused free lot while `freeLotsMinted < 1000`, `costWei = max(0, lots - 1) * 2000000000000000` wei; otherwise `lots * 2000000000000000` wei).
+- Example 1 — Free-claim 1 lot (0 BNB = 0 wei -> 60,000,000 ZHUZHU, if `canClaimFree(botAddress) == true`):
+  - `to`: `0x2b41Ba439E661b751BB1bc11cD0F1d4ADEE36218`
+  - `value`: `0`
   - `data`: `0xa0712d680000000000000000000000000000000000000000000000000000000000000001`
-- Example 2 — Mint max 10 lots (0.02 BNB = 20000000000000000 wei -> 600,000,000 ZHUZHU):
-  - `to`: `0xCD7d8B1407e036ee8B352f600CADD8F91C1578f5`
-  - `value`: `20000000000000000`
+- Example 2 — Mint max 10 lots on a free-eligible wallet (0.018 BNB = 18000000000000000 wei -> 600,000,000 ZHUZHU):
+  - `to`: `0x2b41Ba439E661b751BB1bc11cD0F1d4ADEE36218`
+  - `value`: `18000000000000000`
   - `data`: `0xa0712d68000000000000000000000000000000000000000000000000000000000000000a`
 
 ### Step 4: Claim BNB Dividends (After `tradingLive() == true`)
 - Read `DIVIDEND_TRACKER.withdrawable(botAddress)` [selector: `0xce513b6f`].
 - If `withdrawable > 0`:
-  - `to`: `0xe4Ffc3d528E9dd3942655bc584611D9ad851c01c`
+  - `to`: `0x1F2B7f19D13937008172ECaBB18096047188Db7D`
   - `value`: `0`
   - `data`: `0x4e71d92d` (`claim()`)
 
 ## Safety Guardrails for Agents
 1. NEVER transfer BNB directly to EOAs or unknown contracts.
-2. Always match exact `value = lots * 2000000000000000` wei when calling `mint(lots)`.
+2. Always call `quoteMintCost(botAddress, lots)` first and match its returned `costWei` when calling `mint(lots)`.
 3. Keep extra BNB (e.g., ~0.002 BNB) in the bot wallet for gas on `register`, `mint`, and `claim`.

@@ -3,13 +3,13 @@ import { parseAbi, type Address } from 'viem';
 export const TARGET_CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID || 56);
 
 export const ZHUZHU_TOKEN_ADDRESS = (process.env.NEXT_PUBLIC_ZHUZHU_TOKEN_ADDRESS ||
-  '0xCD7d8B1407e036ee8B352f600CADD8F91C1578f5') as Address;
+  '0x2b41Ba439E661b751BB1bc11cD0F1d4ADEE36218') as Address;
 
 export const AGENT_ID_REGISTRY_ADDRESS = (process.env.NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS ||
   '0x9fd5C0a14b71b169C770e6994155117afC680e8f') as Address;
 
 export const DIVIDEND_TRACKER_ADDRESS = (process.env.NEXT_PUBLIC_DIVIDEND_TRACKER_ADDRESS ||
-  '0xe4Ffc3d528E9dd3942655bc584611D9ad851c01c') as Address;
+  '0x1F2B7f19D13937008172ECaBB18096047188Db7D') as Address;
 
 export const DEAD_ADDRESS = '0x000000000000000000000000000000000000dEaD' as Address;
 
@@ -52,8 +52,11 @@ export function formatContractError(err: unknown): string {
   if (msg.includes('mint closed')) {
     return '社区认购已结束（已满额或已自动开盘组池）';
   }
+  if (msg.includes('already claimed 1 free lot')) {
+    return '该钱包已领取过 1 份免费额度，继续认购需支付 0.002 BNB/份';
+  }
   if (msg.includes('incorrect bnb amount')) {
-    return '支付的 BNB 金额必须等于 份数 × 0.002 BNB';
+    return '支付的 BNB 金额必须与合约报价一致（含首份免费优惠或 0.002 BNB/份）';
   }
   if (msg.includes('already registered')) {
     return '当前钱包已绑定 .ai 身份，可直接参与认购';
@@ -83,6 +86,8 @@ export const ZHUZHU_ABI = parseAbi([
   'function LOT_PRICE() view returns (uint256)',
   'function MAX_LOTS_PER_WALLET() view returns (uint256)',
   'function TOTAL_LOTS() view returns (uint256)',
+  'function FREE_LOTS() view returns (uint256)',
+  'function FREE_LOTS_PER_WALLET() view returns (uint256)',
   'function TOKENS_PER_LOT() view returns (uint256)',
   'function TOTAL_SUPPLY() view returns (uint256)',
   'function hasAgentId(address account) view returns (bool)',
@@ -90,7 +95,11 @@ export const ZHUZHU_ABI = parseAbi([
   'function mintOpen() view returns (bool)',
   'function tradingLive() view returns (bool)',
   'function lotsMinted() view returns (uint256)',
+  'function freeLotsMinted() view returns (uint256)',
   'function mintedLots(address account) view returns (uint256)',
+  'function hasClaimedFree(address account) view returns (bool)',
+  'function canClaimFree(address account) view returns (bool)',
+  'function quoteMintCost(address account, uint256 lots) view returns (uint256 costWei, uint256 freeLotsUsed)',
   'function raisedBnb() view returns (uint256)',
   'function totalBurned() view returns (uint256)',
   'function pair() view returns (address)',
